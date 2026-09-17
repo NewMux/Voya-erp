@@ -1,0 +1,30 @@
+# Keep the Docker build context small and, more importantly, keep secrets out
+# of it entirely. Next.js's standalone output copies .env* files into the
+# bundle it produces (so `next start` can load them) — if a local .env ever
+# reached the build context, it would get baked into the shipped image layer.
+# Excluding it here means that can never happen, regardless of what Next does.
+
+node_modules
+.next
+out
+build
+dist
+
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+
+storage
+!storage/.gitkeep
+
+*.tsbuildinfo
+next-env.d.ts
+
+npm-debug.log*
+coverage
+.vitest
+.eslintcache
+.DS_Store
