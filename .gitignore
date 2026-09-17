@@ -8,8 +8,8 @@ dist/
 .env.local
 .env.*.local
 
-storage/
-!storage/.gitkeep
+/storage/
+!/storage/.gitkeep
 
 *.tsbuildinfo
 next-env.d.ts
