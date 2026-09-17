@@ -1,0 +1,75 @@
+@import 'tailwindcss';
+
+/*
+ * Voya Travel & Tourism brand.
+ * Primary teal #4CA7BC, with a gold accent reserved for the membership
+ * programme — gold is never used for generic UI, so a gold badge always means
+ * "this customer is a member".
+ */
+
+@theme {
+  --color-voya-50: #f0f9fb;
+  --color-voya-100: #d9eff4;
+  --color-voya-200: #b7e0ea;
+  --color-voya-300: #85c9da;
+  --color-voya-400: #4ca7bc;
+  --color-voya-500: #368da3;
+  --color-voya-600: #2f7389;
+  --color-voya-700: #2b5f70;
+  --color-voya-800: #2a4f5d;
+  --color-voya-900: #27434f;
+  --color-voya-950: #152b35;
+
+  --color-gold-50: #fbf8ef;
+  --color-gold-100: #f5edd4;
+  --color-gold-200: #ead9a6;
+  --color-gold-300: #dec070;
+  --color-gold-400: #d4a843;
+  --color-gold-500: #c68f2c;
+  --color-gold-600: #aa6f23;
+  --color-gold-700: #8a5220;
+  --color-gold-800: #734321;
+  --color-gold-900: #62381f;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+}
+
+:root {
+  --background: #f6f8f9;
+  --foreground: #152b35;
+  --surface: #ffffff;
+  --border: #e2e8ea;
+  --muted: #64748b;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Keyboard focus stays visible everywhere; this is an all-day data-entry tool. */
+:focus-visible {
+  outline: 2px solid var(--color-voya-400);
+  outline-offset: 2px;
+}
+
+/* Reserve the scrollbar gutter so navigating between short and long lists does
+   not shift the layout horizontally. */
+html {
+  scrollbar-gutter: stable;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

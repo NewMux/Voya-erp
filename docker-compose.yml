@@ -1,0 +1,50 @@
+# Local development stack.
+#
+# Production runs on Hetzner via Coolify, which builds the Dockerfile directly
+# and supplies its own Postgres — this file is for developer machines and CI.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: voya
+      POSTGRES_PASSWORD: voya
+      POSTGRES_DB: voya_erp
+    ports:
+      - '5432:5432'
+    volumes:
+      - voya_db:/var/lib/postgresql/data
+      # `prisma migrate dev` needs a shadow database, and the test suite needs
+      # its own, since it truncates every table between cases.
+      - ./docker/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U voya -d voya_erp']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Optional: run the production image locally. `docker compose up app`.
+  app:
+    profiles: ['full']
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://voya:voya@db:5432/voya_erp?schema=public
+      AUTH_SECRET: ${AUTH_SECRET:-local-development-secret-change-me}
+      AUTH_URL: http://localhost:3000
+      AUTH_TRUST_HOST: 'true'
+      CRON_SECRET: ${CRON_SECRET:-local-development-cron-secret-change}
+      WHATSAPP_PROVIDER: manual
+      RUN_SEED_ON_START: 'true'
+    ports:
+      - '3000:3000'
+    volumes:
+      - voya_storage:/app/storage
+
+volumes:
+  voya_db:
+  voya_storage:

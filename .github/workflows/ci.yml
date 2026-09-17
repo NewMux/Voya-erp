@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: voya
+          POSTGRES_PASSWORD: voya
+          POSTGRES_DB: voya_erp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U voya"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://voya:voya@localhost:5432/voya_erp?schema=public
+      # The suite truncates every table, so it gets its own database.
+      TEST_DATABASE_URL: postgresql://voya:voya@localhost:5432/voya_erp_test?schema=public
+      AUTH_SECRET: ci-secret-value-at-least-16-chars
+      CRON_SECRET: ci-cron-secret-value-at-least-16-chars
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Create the test database
+        run: PGPASSWORD=voya psql -h localhost -U voya -d voya_erp -c 'CREATE DATABASE voya_erp_test OWNER voya;'
+
+      - name: Apply migrations
+        run: |
+          npx prisma migrate deploy
+          DATABASE_URL="$TEST_DATABASE_URL" npx prisma migrate deploy
+
+      - run: npx prisma generate
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run build
