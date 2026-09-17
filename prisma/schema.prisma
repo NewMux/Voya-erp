@@ -1,0 +1,1151 @@
+// Voya Travel & Tourism — Phase 1 ERP data model.
+//
+// Conventions used throughout:
+//   * Money is Decimal(18, 3). Bahraini Dinar has three decimal places (fils),
+//     so a two-decimal scale would silently truncate. Never use Float.
+//   * FX rates are Decimal(18, 6) and are snapshotted onto the row that used
+//     them, because the PRD requires conversion "at entry-time rate".
+//   * Human-facing reference numbers come from Postgres sequences (see the
+//     `sequences` migration), never from count() + 1, which races.
+//   * createdById / recordedById are captured now so the Phase 2 audit trail
+//     has a foundation. No audit log table exists in Phase 1.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Shared
+// ---------------------------------------------------------------------------
+
+/// BHD is the base reporting currency. The rest are supplier-cost currencies.
+enum Currency {
+  BHD
+  USD
+  EUR
+  GBP
+  SAR
+  AED
+}
+
+/// Phase 1 ships three fixed roles. The full HR/permissions module is Phase 2.
+enum UserRole {
+  ADMIN
+  ACCOUNTANT
+  STAFF
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         UserRole  @default(STAFF)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions            Session[]
+  createdBookings     Booking[]           @relation("BookingCreatedBy")
+  recordedPayments    Payment[]           @relation("PaymentRecordedBy")
+  recordedRefunds     Refund[]            @relation("RefundRecordedBy")
+  uploadedAttachments BookingAttachment[]
+  createdInvoices     Invoice[]           @relation("InvoiceCreatedBy")
+  sentNotifications   NotificationOutbox[] @relation("NotificationSentBy")
+
+  @@index([role])
+  @@map("users")
+}
+
+/// Database-backed sessions, so deactivating a user takes effect immediately
+/// instead of waiting for a stateless JWT to expire.
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+/// Key/value store backing the Settings screen (reminder lead times, company
+/// details on the invoice, capacity alert threshold).
+model AppSetting {
+  key       String   @id
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
+/// Optional reference rates used to pre-fill the FX field on the booking form.
+/// The rate actually used is always copied onto the booking itself.
+model ExchangeRate {
+  id            String   @id @default(cuid())
+  baseCurrency  Currency
+  quoteCurrency Currency
+  rate          Decimal  @db.Decimal(18, 6)
+  effectiveOn   DateTime @db.Date
+  createdAt     DateTime @default(now())
+
+  @@unique([baseCurrency, quoteCurrency, effectiveOn])
+  @@map("exchange_rates")
+}
+
+// ---------------------------------------------------------------------------
+// Customers (CRM) — PRD section 2
+// ---------------------------------------------------------------------------
+
+enum CustomerType {
+  INDIVIDUAL
+  CORPORATE
+}
+
+model Customer {
+  id            String       @id @default(cuid())
+  /// As per passport.
+  fullName      String
+  email         String?
+  /// E.164, e.g. +97333123456.
+  phone         String
+  /// Falls back to `phone` when empty. Primary notification channel.
+  whatsappPhone String?
+  /// ISO 3166-1 alpha-2, used for visa-requirement lookups.
+  nationality   String?
+  customerType  CustomerType @default(INDIVIDUAL)
+
+  // Passport lives on this row alone, so a future PDPL decision (encryption at
+  // rest, retention, redaction) stays a contained change. Proactive expiry
+  // alerts are Phase 2; the column exists so the data is there when they land.
+  passportNumber String?
+  passportExpiry DateTime? @db.Date
+
+  // Corporate-only fields.
+  companyName    String?
+  /// Bahrain Commercial Registration number.
+  crNumber       String?
+  billingContact String?
+  billingEmail   String?
+  agreedRateNote String? @db.Text
+
+  notes     String?  @db.Text
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  membership      Membership?
+  bookings        Booking[]
+  invoices        Invoice[]
+  payments        Payment[]
+  travelers       Traveler[]
+  waitlistEntries GroupWaitlistEntry[]
+  notifications   NotificationOutbox[]
+
+  @@index([fullName])
+  @@index([phone])
+  @@index([passportExpiry])
+  @@map("customers")
+}
+
+// ---------------------------------------------------------------------------
+// Membership — PRD section 5 (technical layer only; card printing out of scope)
+// ---------------------------------------------------------------------------
+
+/// Phase 1 issues VOYAGEUR only. GOLD/PLATINUM exist so tiers can be turned on
+/// later without a migration.
+enum MembershipTier {
+  VOYAGEUR
+  GOLD
+  PLATINUM
+}
+
+enum MembershipStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+model Membership {
+  id String @id @default(cuid())
+
+  /// Sequential, e.g. VY-0001042. The primary lookup key on the booking screen.
+  /// No QR code — sequential number only, per the client's decision.
+  membershipNumber String           @unique
+  customerId       String           @unique
+  tier             MembershipTier   @default(VOYAGEUR)
+  status           MembershipStatus @default(ACTIVE)
+
+  startDate  DateTime @db.Date
+  expiryDate DateTime @db.Date
+
+  /// Benefits are stored per membership rather than per tier, so an individual
+  /// member's terms can be overridden without affecting anyone else.
+  discountPercent      Decimal @default(0) @db.Decimal(5, 2)
+  groupBookingPriority Boolean @default(true)
+
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customer      Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  renewals      MembershipRenewal[]
+  payments      Payment[]
+  notifications NotificationOutbox[]
+
+  @@index([status, expiryDate])
+  @@map("memberships")
+}
+
+/// One row per subscription period, so renewal history survives the membership
+/// row being updated in place.
+model MembershipRenewal {
+  id           String   @id @default(cuid())
+  membershipId String
+  periodStart  DateTime @db.Date
+  periodEnd    DateTime @db.Date
+  amount       Decimal  @db.Decimal(18, 3)
+  currency     Currency @default(BHD)
+  paymentId    String?
+  createdAt    DateTime @default(now())
+
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  payment    Payment?   @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([membershipId])
+  @@map("membership_renewals")
+}
+
+// ---------------------------------------------------------------------------
+// Suppliers — PRD section 3
+// ---------------------------------------------------------------------------
+
+enum SupplierType {
+  AIRLINE
+  HOTEL
+  DMC
+  TRANSPORT
+  VISA_AGENT
+}
+
+enum PaymentTerms {
+  PREPAID
+  CREDIT
+}
+
+enum CommissionType {
+  NONE
+  FIXED_PERCENT
+  FIXED_AMOUNT
+}
+
+model Supplier {
+  id           String       @id @default(cuid())
+  name         String
+  type         SupplierType
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+  country      String?
+
+  paymentTerms PaymentTerms @default(PREPAID)
+  /// Credit period in days. Only meaningful when paymentTerms is CREDIT.
+  creditDays   Int?
+
+  commissionType  CommissionType @default(NONE)
+  /// A percentage when FIXED_PERCENT, an amount in `defaultCurrency` when
+  /// FIXED_AMOUNT, ignored when NONE.
+  commissionValue Decimal        @default(0) @db.Decimal(18, 3)
+  defaultCurrency Currency       @default(BHD)
+
+  notes     String?  @db.Text
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rateSheets        SupplierRateSheet[]
+  bookings          Booking[]
+  packageComponents PackageComponent[]
+  invoices          SupplierInvoice[]
+
+  @@index([type])
+  @@index([name])
+  @@map("suppliers")
+}
+
+/// Net rate sheets are versioned so historical bookings keep the rate that was
+/// applicable when they were made — an explicit PRD requirement.
+model SupplierRateSheet {
+  id            String    @id @default(cuid())
+  supplierId    String
+  version       Int
+  name          String
+  effectiveFrom DateTime  @db.Date
+  /// Null means "current" — open ended.
+  effectiveTo   DateTime? @db.Date
+  currency      Currency  @default(BHD)
+  notes         String?   @db.Text
+
+  /// Optional uploaded rate sheet document.
+  fileKey      String?
+  fileName     String?
+  fileMimeType String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  supplier Supplier  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@unique([supplierId, version])
+  @@index([supplierId, effectiveFrom])
+  @@map("supplier_rate_sheets")
+}
+
+enum SupplierInvoiceStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  DISPUTED
+}
+
+/// What the supplier billed us. Reconciliation matches these against the
+/// bookings they cover.
+model SupplierInvoice {
+  id         String   @id @default(cuid())
+  supplierId String
+  reference  String
+  issueDate  DateTime @db.Date
+  dueDate    DateTime? @db.Date
+
+  amount     Decimal  @db.Decimal(18, 3)
+  currency   Currency @default(BHD)
+  /// Rate to BHD captured when the invoice was entered.
+  fxRate     Decimal  @default(1) @db.Decimal(18, 6)
+  amountBase Decimal  @db.Decimal(18, 3)
+  paidAmount Decimal  @default(0) @db.Decimal(18, 3)
+
+  status       SupplierInvoiceStatus @default(UNPAID)
+  disputeNote  String?               @db.Text
+  notes        String?               @db.Text
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  supplier Supplier                 @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  bookings SupplierInvoiceBooking[]
+
+  @@unique([supplierId, reference])
+  @@index([status, dueDate])
+  @@map("supplier_invoices")
+}
+
+/// Join table: one supplier invoice can cover many bookings, and a booking can
+/// appear on more than one supplier invoice (e.g. a land bill and a flight bill).
+model SupplierInvoiceBooking {
+  supplierInvoiceId String
+  bookingId         String
+  amount            Decimal @db.Decimal(18, 3)
+
+  supplierInvoice SupplierInvoice @relation(fields: [supplierInvoiceId], references: [id], onDelete: Cascade)
+  booking         Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@id([supplierInvoiceId, bookingId])
+  @@index([bookingId])
+  @@map("supplier_invoice_bookings")
+}
+
+// ---------------------------------------------------------------------------
+// Bookings — PRD section 1
+// ---------------------------------------------------------------------------
+
+enum BookingType {
+  FLIGHT
+  HOTEL
+  PACKAGE
+  VISA
+  TRANSPORT
+  GROUP_ADVENTURE
+}
+
+/// Inquiry → Confirmed → Ticketed/Vouchered → Completed → Cancelled.
+enum BookingStatus {
+  INQUIRY
+  CONFIRMED
+  TICKETED
+  COMPLETED
+  CANCELLED
+}
+
+/// Rolled up from payments by `recalcBookingPaymentStatus`; never set by hand.
+enum BookingPaymentStatus {
+  UNPAID
+  DEPOSIT_PAID
+  FULLY_PAID
+}
+
+model Booking {
+  id         String      @id @default(cuid())
+  /// Sequential, e.g. VB-2026-000142.
+  reference  String      @unique
+  customerId String
+  type       BookingType
+  supplierId String?
+  /// Snapshot of the rate sheet in force at booking time.
+  supplierRateSheetId String?
+
+  departureDate DateTime? @db.Date
+  returnDate    DateTime? @db.Date
+
+  adults   Int @default(1)
+  children Int @default(0)
+  infants  Int @default(0)
+
+  // --- Financials. Cost is hidden from every client-facing document. ---
+  costAmount   Decimal  @default(0) @db.Decimal(18, 3)
+  costCurrency Currency @default(BHD)
+  /// Rate to BHD captured at entry time, per the PRD.
+  fxRate       Decimal  @default(1) @db.Decimal(18, 6)
+  /// costAmount * fxRate, stored so reporting never has to re-derive it.
+  costAmountBase Decimal @default(0) @db.Decimal(18, 3)
+
+  /// Always in BHD — this is what the customer is charged.
+  sellingAmount Decimal @default(0) @db.Decimal(18, 3)
+
+  /// Membership benefit snapshotted at creation, so a later tier change never
+  /// rewrites historical bookings.
+  membershipDiscountPercent Decimal @default(0) @db.Decimal(5, 2)
+  membershipDiscountAmount  Decimal @default(0) @db.Decimal(18, 3)
+
+  /// sellingAmount - membershipDiscountAmount. What the customer owes.
+  netSellingAmount Decimal @default(0) @db.Decimal(18, 3)
+  /// netSellingAmount - costAmountBase.
+  marginAmount     Decimal @default(0) @db.Decimal(18, 3)
+
+  status        BookingStatus        @default(INQUIRY)
+  paymentStatus BookingPaymentStatus @default(UNPAID)
+
+  // --- Payment plan header. The instalments themselves are schedule items. ---
+  depositType   DepositType? @default(PERCENT)
+  /// A percentage when depositType is PERCENT, otherwise a BHD amount.
+  depositValue  Decimal?     @db.Decimal(18, 3)
+  balanceDueDate DateTime?   @db.Date
+
+  notes       String?   @db.Text
+  cancelledAt DateTime?
+  cancelReason String?  @db.Text
+  confirmedAt DateTime?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer          Customer            @relation(fields: [customerId], references: [id])
+  supplier          Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  supplierRateSheet SupplierRateSheet?  @relation(fields: [supplierRateSheetId], references: [id], onDelete: SetNull)
+  createdBy         User?               @relation("BookingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  flightDetail    FlightDetail?
+  hotelDetail     HotelDetail?
+  visaDetail      VisaDetail?
+  transportDetail TransportDetail?
+  groupDetail     GroupAdventureDetail?
+  packageComponents PackageComponent[]
+
+  travelers     Traveler[]
+  attachments   BookingAttachment[]
+  scheduleItems PaymentScheduleItem[]
+  allocations   PaymentAllocation[]
+  refunds       Refund[]
+  invoiceLines  InvoiceLine[]
+  supplierInvoices SupplierInvoiceBooking[]
+  notifications NotificationOutbox[]
+
+  @@index([customerId])
+  @@index([supplierId])
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([departureDate])
+  @@index([type])
+  @@map("bookings")
+}
+
+/// Per-type detail tables keep each booking type's required fields actually
+/// required, instead of one sparse forty-column table.
+
+model FlightDetail {
+  bookingId        String  @id
+  airline          String
+  pnr              String?
+  routeFrom        String
+  routeTo          String
+  /// Set for return/multi-city itineraries.
+  returnRouteFrom  String?
+  returnRouteTo    String?
+  cabinClass       String?
+  baggageAllowance String?
+  ticketNumbers    String?
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([pnr])
+  @@map("flight_details")
+}
+
+enum BoardBasis {
+  RO
+  BB
+  HB
+  FB
+}
+
+model HotelDetail {
+  bookingId     String     @id
+  propertyName  String
+  city          String?
+  roomType      String?
+  boardBasis    BoardBasis @default(RO)
+  checkIn       DateTime   @db.Date
+  checkOut      DateTime   @db.Date
+  rooms         Int        @default(1)
+  confirmationNumber String?
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("hotel_details")
+}
+
+enum VisaProcessingStatus {
+  NOT_STARTED
+  DOCUMENTS_PENDING
+  SUBMITTED
+  APPROVED
+  REJECTED
+  ISSUED
+}
+
+model VisaDetail {
+  bookingId          String               @id
+  destinationCountry String
+  visaType           String
+  processingStatus   VisaProcessingStatus @default(NOT_STARTED)
+  applicationNumber  String?
+  submittedAt        DateTime?            @db.Date
+  decisionAt         DateTime?            @db.Date
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("visa_details")
+}
+
+enum TransportKind {
+  AIRPORT_TRANSFER
+  CAR_RENTAL
+  INTER_CITY
+}
+
+model TransportDetail {
+  bookingId       String        @id
+  kind            TransportKind
+  pickupLocation  String
+  dropoffLocation String?
+  pickupAt        DateTime?
+  vehicleType     String?
+  /// Car rental only.
+  returnAt        DateTime?
+  driverRequired  Boolean       @default(false)
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("transport_details")
+}
+
+enum PackageComponentKind {
+  FLIGHT
+  HOTEL
+  TRANSPORT
+  ACTIVITY
+  OTHER
+}
+
+/// A package bundles flight + hotel + transport + activities under one price.
+/// Components carry their own cost so the package margin is accurate; they have
+/// no individual selling price.
+model PackageComponent {
+  id          String               @id @default(cuid())
+  bookingId   String
+  kind        PackageComponentKind
+  description String
+  supplierId  String?
+
+  costAmount     Decimal  @default(0) @db.Decimal(18, 3)
+  costCurrency   Currency @default(BHD)
+  fxRate         Decimal  @default(1) @db.Decimal(18, 6)
+  costAmountBase Decimal  @default(0) @db.Decimal(18, 3)
+
+  startDate DateTime? @db.Date
+  endDate   DateTime? @db.Date
+  sortOrder Int       @default(0)
+
+  booking  Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  supplier Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+  @@map("package_components")
+}
+
+enum TravelerType {
+  ADULT
+  CHILD
+  INFANT
+}
+
+/// Named travellers on a booking. Needed for the Group Adventure roster, and it
+/// is where the Phase 2 rooming list will read from.
+model Traveler {
+  id        String       @id @default(cuid())
+  bookingId String
+  /// Set when the traveller is also a customer in their own right.
+  customerId String?
+  fullName  String
+  type      TravelerType @default(ADULT)
+
+  passportNumber String?
+  passportExpiry DateTime? @db.Date
+  nationality    String?
+  dateOfBirth    DateTime? @db.Date
+  phone          String?
+  /// Group Adventure: this traveller is in a single room.
+  singleSupplement Boolean @default(false)
+  notes            String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  booking  Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+  @@index([customerId])
+  @@map("travelers")
+}
+
+enum AttachmentKind {
+  TICKET
+  VOUCHER
+  VISA_COPY
+  PASSPORT_COPY
+  INVOICE
+  OTHER
+}
+
+model BookingAttachment {
+  id        String         @id @default(cuid())
+  bookingId String
+  kind      AttachmentKind @default(OTHER)
+  /// Opaque storage key. Files are never served from a public path; downloads
+  /// go through /api/files/[key], which checks the session first.
+  fileKey   String         @unique
+  fileName  String
+  mimeType  String
+  sizeBytes Int
+
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  booking    Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  uploadedBy User?   @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+  @@map("booking_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// Payment plan — PRD section 1.3 (applies to ALL booking types)
+// ---------------------------------------------------------------------------
+
+enum DepositType {
+  PERCENT
+  AMOUNT
+}
+
+enum ScheduleItemKind {
+  DEPOSIT
+  BALANCE
+  INSTALLMENT
+}
+
+enum ScheduleItemStatus {
+  PENDING
+  PARTIALLY_PAID
+  PAID
+  WAIVED
+  CANCELLED
+}
+
+/// Instalment rows rather than two columns on Booking: the reminder query
+/// becomes trivial and multi-instalment plans need no migration.
+model PaymentScheduleItem {
+  id        String             @id @default(cuid())
+  bookingId String
+  kind      ScheduleItemKind
+  sequence  Int                @default(0)
+  amountDue Decimal            @db.Decimal(18, 3)
+  dueDate   DateTime           @db.Date
+  status    ScheduleItemStatus @default(PENDING)
+  /// Rolled up from allocations; never set by hand.
+  paidAmount Decimal           @default(0) @db.Decimal(18, 3)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  booking     Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  allocations PaymentAllocation[]
+  notifications NotificationOutbox[]
+
+  @@index([bookingId])
+  @@index([status, dueDate])
+  @@map("payment_schedule_items")
+}
+
+// ---------------------------------------------------------------------------
+// Group Adventure — PRD section 1.4
+// ---------------------------------------------------------------------------
+
+/// A reusable itinerary. Repeat departures are created from a template rather
+/// than retyped.
+model GroupTripTemplate {
+  id           String   @id @default(cuid())
+  name         String
+  destination  String?
+  summary      String?  @db.Text
+  durationDays Int      @default(1)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  itineraryDays GroupItineraryDay[]
+  departures    GroupDeparture[]
+
+  @@map("group_trip_templates")
+}
+
+/// Day-by-day itinerary. Rows belong either to a template or to a departure
+/// (a departure copies the template's days so later template edits do not
+/// rewrite trips that have already been sold).
+model GroupItineraryDay {
+  id          String  @id @default(cuid())
+  templateId  String?
+  departureId String?
+  dayNumber   Int
+  title       String
+  description String? @db.Text
+
+  template  GroupTripTemplate? @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  departure GroupDeparture?    @relation(fields: [departureId], references: [id], onDelete: Cascade)
+
+  @@index([templateId, dayNumber])
+  @@index([departureId, dayNumber])
+  @@map("group_itinerary_days")
+}
+
+enum DepartureStatus {
+  DRAFT
+  OPEN
+  FULL
+  CLOSED
+  COMPLETED
+  CANCELLED
+}
+
+model GroupDeparture {
+  id         String  @id @default(cuid())
+  templateId String?
+  name       String
+  destination String?
+
+  departureDate DateTime  @db.Date
+  returnDate    DateTime? @db.Date
+
+  capacity Int
+  /// Denormalised live counter. Only ever written inside the seat-booking
+  /// transaction, which locks this row first (SELECT ... FOR UPDATE).
+  seatsBooked Int @default(0)
+
+  pricePerSeat     Decimal  @db.Decimal(18, 3)
+  singleSupplement Decimal  @default(0) @db.Decimal(18, 3)
+  currency         Currency @default(BHD)
+
+  status DepartureStatus @default(DRAFT)
+  /// True once capacity has been reached, which is what opens the waitlist.
+  waitlistEnabled Boolean @default(false)
+  tourLeaderName  String?
+  notes           String? @db.Text
+
+  /// Highest capacity-alert threshold already notified to staff, so the alert
+  /// is not resent on every booking.
+  lastCapacityAlertPercent Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  template      GroupTripTemplate?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  itineraryDays GroupItineraryDay[]
+  bookings      GroupAdventureDetail[]
+  waitlist      GroupWaitlistEntry[]
+  notifications NotificationOutbox[]
+
+  @@index([departureDate])
+  @@index([status])
+  @@map("group_departures")
+}
+
+/// Links a GROUP_ADVENTURE booking to the departure it holds seats on.
+model GroupAdventureDetail {
+  bookingId   String @id
+  departureId String
+  seats       Int    @default(1)
+  /// How many of those seats take the single supplement.
+  singleSupplementSeats Int @default(0)
+  /// Price per seat snapshotted at booking time.
+  pricePerSeat Decimal @db.Decimal(18, 3)
+
+  booking   Booking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  departure GroupDeparture @relation(fields: [departureId], references: [id])
+
+  @@index([departureId])
+  @@map("group_adventure_details")
+}
+
+enum WaitlistStatus {
+  WAITING
+  OFFERED
+  CONVERTED
+  CANCELLED
+}
+
+/// Auto-enabled once capacity is reached. Members with groupBookingPriority are
+/// offered seats first — `priority` is snapshotted from the membership at the
+/// time the entry is created.
+model GroupWaitlistEntry {
+  id             String         @id @default(cuid())
+  departureId    String
+  customerId     String
+  requestedSeats Int            @default(1)
+  status         WaitlistStatus @default(WAITING)
+  priority       Boolean        @default(false)
+  notes          String?        @db.Text
+  offeredAt      DateTime?
+  resolvedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  departure GroupDeparture @relation(fields: [departureId], references: [id], onDelete: Cascade)
+  customer  Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([departureId, customerId])
+  @@index([departureId, status])
+  @@map("group_waitlist_entries")
+}
+
+// ---------------------------------------------------------------------------
+// Finance & invoicing — PRD section 4
+// ---------------------------------------------------------------------------
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+/// Controls which columns the PDF renders. BILINGUAL shows English and Arabic
+/// side by side.
+enum InvoiceLanguage {
+  EN
+  AR
+  BILINGUAL
+}
+
+model Invoice {
+  id     String @id @default(cuid())
+  /// Auto-generated, sequential, e.g. VOY-2026-000031.
+  number String @unique
+
+  customerId String
+  issueDate  DateTime @db.Date
+  dueDate    DateTime @db.Date
+
+  status   InvoiceStatus   @default(DRAFT)
+  language InvoiceLanguage @default(EN)
+  currency Currency        @default(BHD)
+
+  /// Sum of line totals before the invoice-level discount.
+  subtotal      Decimal @default(0) @db.Decimal(18, 3)
+  discountTotal Decimal @default(0) @db.Decimal(18, 3)
+  total         Decimal @default(0) @db.Decimal(18, 3)
+  /// Rolled up from payments; never set by hand.
+  paidAmount    Decimal @default(0) @db.Decimal(18, 3)
+
+  notes       String?   @db.Text
+  notesAr     String?   @db.Text
+  terms       String?   @db.Text
+  sentAt      DateTime?
+  cancelledAt DateTime?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer  Customer      @relation(fields: [customerId], references: [id])
+  createdBy User?         @relation("InvoiceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  lines     InvoiceLine[]
+  payments  Payment[]
+
+  @@index([customerId])
+  @@index([status, dueDate])
+  @@map("invoices")
+}
+
+/// One invoice can bundle several bookings for the same customer.
+model InvoiceLine {
+  id        String  @id @default(cuid())
+  invoiceId String
+  bookingId String?
+
+  description   String
+  /// Arabic description, used by the AR and BILINGUAL templates.
+  descriptionAr String?
+  quantity      Decimal @default(1) @db.Decimal(12, 2)
+  unitPrice     Decimal @db.Decimal(18, 3)
+  lineTotal     Decimal @db.Decimal(18, 3)
+  sortOrder     Int     @default(0)
+
+  invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId])
+  @@index([bookingId])
+  @@map("invoice_lines")
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  BENEFIT_PAY
+  OTHER
+}
+
+/// Money received from a customer. A payment may settle an invoice, one or more
+/// bookings, or a membership renewal.
+model Payment {
+  id         String  @id @default(cuid())
+  customerId String
+  invoiceId  String?
+  membershipId String?
+
+  amount   Decimal       @db.Decimal(18, 3)
+  currency Currency      @default(BHD)
+  method   PaymentMethod
+  /// Cheque number, transfer reference, card auth code.
+  reference String?
+  paidAt    DateTime
+  notes     String?       @db.Text
+
+  recordedById String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  customer   Customer            @relation(fields: [customerId], references: [id])
+  invoice    Invoice?            @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  membership Membership?         @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  recordedBy User?               @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+  allocations PaymentAllocation[]
+  refunds     Refund[]
+  renewals    MembershipRenewal[]
+
+  @@index([customerId])
+  @@index([invoiceId])
+  @@index([paidAt])
+  @@map("payments")
+}
+
+/// Splits a payment across bookings. Without this, a payment against an invoice
+/// that bundles three bookings could not be attributed to any of them.
+model PaymentAllocation {
+  id             String  @id @default(cuid())
+  paymentId      String
+  bookingId      String
+  scheduleItemId String?
+  amount         Decimal @db.Decimal(18, 3)
+
+  payment      Payment              @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  booking      Booking              @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  scheduleItem PaymentScheduleItem? @relation(fields: [scheduleItemId], references: [id], onDelete: SetNull)
+
+  @@index([paymentId])
+  @@index([bookingId])
+  @@index([scheduleItemId])
+  @@map("payment_allocations")
+}
+
+enum RefundStatus {
+  PENDING
+  PROCESSED
+  REJECTED
+}
+
+/// Refund tracking linked to cancelled bookings.
+model Refund {
+  id        String @id @default(cuid())
+  bookingId String
+  /// The original payment, when the refund traces back to a specific receipt.
+  paymentId String?
+
+  amount   Decimal        @db.Decimal(18, 3)
+  currency Currency       @default(BHD)
+  method   PaymentMethod  @default(BANK_TRANSFER)
+  status   RefundStatus   @default(PENDING)
+  reason   String?        @db.Text
+  reference String?
+  processedAt DateTime?
+
+  recordedById String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  booking    Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  payment    Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  recordedBy User?    @relation("RefundRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+  @@index([status])
+  @@map("refunds")
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp notifications — PRD section 6
+// ---------------------------------------------------------------------------
+
+enum NotificationEvent {
+  BOOKING_CONFIRMED
+  BALANCE_DUE_REMINDER
+  MEMBERSHIP_RENEWAL_REMINDER
+  GROUP_CAPACITY_ALERT
+}
+
+enum NotificationStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+/// Delivery state reported back by the Meta webhook.
+enum NotificationDeliveryStatus {
+  UNKNOWN
+  ACCEPTED
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum NotificationRecipient {
+  CUSTOMER
+  STAFF
+}
+
+/// Message bodies live in the database so staff can reword them without a
+/// deploy. `metaTemplateName` maps to the approved Cloud API template.
+model NotificationTemplate {
+  key   String            @id
+  event NotificationEvent
+  name  String
+
+  bodyEn String  @db.Text
+  bodyAr String? @db.Text
+
+  /// Name of the approved WhatsApp Cloud API template.
+  metaTemplateName String?
+  metaLanguageCode String  @default("en")
+  /// Ordered variable names, mapped to {{1}}, {{2}}, ... in the Meta template.
+  variables        String[]
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  outbox NotificationOutbox[]
+
+  @@map("notification_templates")
+}
+
+/// Every notification is queued here first and dispatched by the cron route.
+/// Nothing is ever sent inline from a request handler, so a WhatsApp outage can
+/// never fail a booking.
+model NotificationOutbox {
+  id            String                @id @default(cuid())
+  event         NotificationEvent
+  templateKey   String
+  recipientType NotificationRecipient @default(CUSTOMER)
+
+  /// E.164 destination, resolved when the row is enqueued.
+  toPhone String
+
+  customerId     String?
+  bookingId      String?
+  membershipId   String?
+  departureId    String?
+  scheduleItemId String?
+
+  /// Variables rendered into the body, and passed as Meta template parameters.
+  variables      Json
+  renderedBodyEn String  @db.Text
+  renderedBodyAr String? @db.Text
+
+  status         NotificationStatus         @default(PENDING)
+  deliveryStatus NotificationDeliveryStatus @default(UNKNOWN)
+  /// When the message becomes eligible to send.
+  scheduledFor   DateTime                   @default(now())
+  attempts       Int                        @default(0)
+  lastError      String?                    @db.Text
+  providerMessageId String?
+  provider       String?
+  sentAt         DateTime?
+  /// True when a staff member dispatched it through the wa.me fallback.
+  sentManually   Boolean                    @default(false)
+  sentById       String?
+
+  /// Makes the dispatcher idempotent: one row per (event, entity, occurrence),
+  /// so re-running the cron job can never message a customer twice.
+  dedupeKey String @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  template     NotificationTemplate @relation(fields: [templateKey], references: [key])
+  customer     Customer?            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  booking      Booking?             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  membership   Membership?          @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  departure    GroupDeparture?      @relation(fields: [departureId], references: [id], onDelete: Cascade)
+  scheduleItem PaymentScheduleItem? @relation(fields: [scheduleItemId], references: [id], onDelete: Cascade)
+  sentBy       User?                @relation("NotificationSentBy", fields: [sentById], references: [id], onDelete: SetNull)
+
+  @@index([status, scheduledFor])
+  @@index([event])
+  @@index([customerId])
+  @@map("notification_outbox")
+}
