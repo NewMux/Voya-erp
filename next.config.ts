@@ -5,11 +5,9 @@ const nextConfig: NextConfig = {
   // does not need node_modules at runtime. Required by the Coolify deployment.
   output: 'standalone',
   outputFileTracingRoot: process.cwd(),
+  // Keep these out of the bundler: Prisma resolves its engine at runtime, and
+  // @react-pdf/renderer ships native-ish font handling that must not be traced.
   serverExternalPackages: ['@prisma/client', 'bcryptjs', '@react-pdf/renderer'],
-  eslint: {
-    // Lint runs as its own CI step; don't fail production builds on style.
-    ignoreDuringBuilds: true,
-  },
 };
 
 export default nextConfig;

@@ -75,7 +75,18 @@ export function isZero(value: DecimalInput): boolean {
 }
 
 export function isNegative(value: DecimalInput): boolean {
-  return toDecimal(value).isNegative();
+  return toDecimal(value).lt(0);
+}
+
+/**
+ * Strictly greater than zero.
+ *
+ * Deliberately not `Decimal.isPositive()`, which tests the sign bit and so
+ * returns *true for zero*. Every caller here means "is there actually money
+ * here", and an unpaid booking must not read as part-paid.
+ */
+export function isPositive(value: DecimalInput): boolean {
+  return toDecimal(value).gt(0);
 }
 
 export function gte(a: DecimalInput, b: DecimalInput): boolean {

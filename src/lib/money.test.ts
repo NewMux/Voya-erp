@@ -10,9 +10,32 @@ import {
   scaleFor,
   subtract,
   sum,
+  isNegative,
+  isPositive,
   toDecimal,
   toStorage,
 } from './money';
+
+describe('sign checks', () => {
+  it('does not treat zero as positive', () => {
+    // decimal.js's own isPositive() tests the sign bit and returns true for
+    // zero, which made every unpaid booking read as part-paid. Guard it.
+    expect(isPositive(0)).toBe(false);
+    expect(isPositive('0.000')).toBe(false);
+    expect(new Decimal(0).isPositive()).toBe(true); // the trap itself
+  });
+
+  it('does not treat zero as negative', () => {
+    expect(isNegative(0)).toBe(false);
+    expect(isNegative('-0.001')).toBe(true);
+  });
+
+  it('recognises genuine positives and negatives', () => {
+    expect(isPositive('0.001')).toBe(true);
+    expect(isPositive('-1')).toBe(false);
+    expect(isNegative('1')).toBe(false);
+  });
+});
 
 describe('currency scale', () => {
   it('gives BHD three decimal places and USD two', () => {
