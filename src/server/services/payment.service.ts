@@ -57,9 +57,13 @@ export async function bookingNetPaid(db: Db, bookingId: string) {
  * should behave.
  */
 export async function recalcScheduleItems(db: Db, bookingId: string): Promise<void> {
+  // Ordered by `sequence` first, not by due date: the deposit is due at booking
+  // time and must always be settled before the balance, even if someone
+  // reschedules the balance to an earlier date. `dueDate` only breaks ties
+  // between instalments that share a sequence.
   const items = await db.paymentScheduleItem.findMany({
     where: { bookingId },
-    orderBy: [{ dueDate: 'asc' }, { sequence: 'asc' }],
+    orderBy: [{ sequence: 'asc' }, { dueDate: 'asc' }],
   });
 
   if (items.length === 0) return;
