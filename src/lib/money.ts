@@ -156,15 +156,16 @@ export function formatMoney(
   return withCode ? `${currency} ${formatted}` : formatted;
 }
 
-/** Arabic-Indic formatting for the AR invoice template. */
+/**
+ * Money for the Arabic invoice template.
+ *
+ * Western digits, not Arabic-Indic: the line-item columns are Western in every
+ * template, and Bahraini invoices conventionally use Western numerals. Only the
+ * currency name is localised, so the two do not sit side by side in different
+ * numeral systems.
+ */
 export function formatMoneyAr(value: DecimalInput, currency: CurrencyCode = BASE_CURRENCY): string {
-  const scale = scaleFor(currency);
-  const rounded = roundMoney(value, currency);
-  const formatted = new Intl.NumberFormat('ar-BH', {
-    minimumFractionDigits: scale,
-    maximumFractionDigits: scale,
-  }).format(rounded.toNumber());
-  return `${formatted} ${CURRENCY_NAMES_AR[currency]}`;
+  return `${formatMoney(value, currency, { withCode: false })} ${CURRENCY_NAMES_AR[currency]}`;
 }
 
 const CURRENCY_NAMES_AR: Record<CurrencyCode, string> = {

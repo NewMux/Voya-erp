@@ -11,6 +11,10 @@ import {
   uploadAttachment,
 } from '@/server/actions/booking.actions';
 import { Button, Card, Field, Input, Select, Textarea } from '@/components/ui';
+import {
+  recordRefundAction,
+  setRefundStatusAction,
+} from '@/server/actions/invoice.actions';
 import { ConfirmButton, FormGrid, FormMessage, SubmitButton } from '@/components/form';
 import { idleState } from '@/server/actions/types';
 
@@ -288,6 +292,92 @@ export function RescheduleForm({
       <SubmitButton size="sm" variant="ghost">
         Save
       </SubmitButton>
+    </form>
+  );
+}
+
+/**
+ * Record a refund against a cancelled or amended booking (PRD section 4.3).
+ *
+ * A refund raised as Pending does not change what the customer has paid; only
+ * marking it Processed does, so approval and disbursement stay distinct.
+ */
+export function RefundForm({
+  bookingId,
+  maxAmount,
+}: {
+  bookingId: string;
+  maxAmount: string;
+}) {
+  const [state, action] = useActionState(recordRefundAction, idleState);
+  const errors = state.fieldErrors ?? {};
+
+  return (
+    <Card title="Record a refund">
+      <form action={action}>
+        <FormMessage state={state} />
+        <input type="hidden" name="bookingId" value={bookingId} />
+
+        <FormGrid>
+          <Field
+            label="Amount (BHD)"
+            required
+            hint={`Received to date: ${maxAmount}`}
+            error={errors.amount}
+          >
+            <Input name="amount" inputMode="decimal" defaultValue={maxAmount} required />
+          </Field>
+
+          <Field label="Method" error={errors.method}>
+            <Select name="method" defaultValue="BANK_TRANSFER">
+              <option value="CASH">Cash</option>
+              <option value="CARD">Card</option>
+              <option value="BANK_TRANSFER">Bank transfer</option>
+              <option value="BENEFIT_PAY">Benefit Pay</option>
+              <option value="OTHER">Other</option>
+            </Select>
+          </Field>
+
+          <Field label="Status" hint="Only Processed reduces what the customer has paid.">
+            <Select name="status" defaultValue="PENDING">
+              <option value="PENDING">Pending approval</option>
+              <option value="PROCESSED">Processed</option>
+            </Select>
+          </Field>
+
+          <Field label="Reference" error={errors.reference}>
+            <Input name="reference" />
+          </Field>
+
+          <Field label="Reason" className="sm:col-span-2" error={errors.reason}>
+            <Textarea name="reason" placeholder="Why is this being refunded?" />
+          </Field>
+        </FormGrid>
+
+        <div className="mt-4">
+          <SubmitButton size="sm" variant="secondary">
+            Record refund
+          </SubmitButton>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+/** Approve or reject a pending refund. */
+export function RefundStatusActions({ refundId }: { refundId: string }) {
+  const [state, action] = useActionState(setRefundStatusAction, idleState);
+
+  return (
+    <form action={action} className="flex gap-1.5">
+      <FormMessage state={state} />
+      <input type="hidden" name="refundId" value={refundId} />
+      <Button type="submit" name="status" value="PROCESSED" size="sm" variant="secondary">
+        Mark processed
+      </Button>
+      <Button type="submit" name="status" value="REJECTED" size="sm" variant="ghost">
+        Reject
+      </Button>
     </form>
   );
 }

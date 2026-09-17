@@ -4,7 +4,7 @@ import { canSeeFinancials, requireUser } from '@/server/guards';
 import { prisma } from '@/lib/prisma';
 import { bookingBalance } from '@/server/services/booking.service';
 import { formatDate, toInputDate } from '@/lib/dates';
-import { formatMoney } from '@/lib/money';
+import { add, formatMoney, toStorage } from '@/lib/money';
 import {
   Alert,
   Badge,
@@ -23,7 +23,14 @@ import {
   PaymentStatusBadge,
   ScheduleStatusBadge,
 } from '@/components/status';
-import { AttachmentsPanel, RescheduleForm, StatusControl, TravelersPanel } from './panels';
+import {
+  AttachmentsPanel,
+  RefundForm,
+  RefundStatusActions,
+  RescheduleForm,
+  StatusControl,
+  TravelersPanel,
+} from './panels';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,6 +71,10 @@ export default async function BookingPage({ params }: { params: Promise<{ id: st
   if (!booking) notFound();
 
   const balance = bookingBalance(booking);
+  // What the customer has actually paid, which caps a sensible refund default.
+  const receivedToDate = toStorage(
+    add(...booking.allocations.map((allocation) => allocation.amount)),
+  );
 
   return (
     <>
@@ -263,6 +274,7 @@ export default async function BookingPage({ params }: { params: Promise<{ id: st
                     <Th>Reason</Th>
                     <Th>Status</Th>
                     <Th className="text-right">Amount</Th>
+                    {showMoney ? <Th /> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -288,6 +300,13 @@ export default async function BookingPage({ params }: { params: Promise<{ id: st
                       <Td className="text-right tabular-nums">
                         {formatMoney(refund.amount.toString(), 'BHD', { withCode: false })}
                       </Td>
+                      {showMoney ? (
+                        <Td>
+                          {refund.status === 'PENDING' ? (
+                            <RefundStatusActions refundId={refund.id} />
+                          ) : null}
+                        </Td>
+                      ) : null}
                     </tr>
                   ))}
                 </tbody>
@@ -354,6 +373,10 @@ export default async function BookingPage({ params }: { params: Promise<{ id: st
                 ))}
               </ul>
             </Card>
+          ) : null}
+
+          {showMoney && receivedToDate !== '0.000' ? (
+            <RefundForm bookingId={booking.id} maxAmount={receivedToDate} />
           ) : null}
 
           <AttachmentsPanel bookingId={booking.id} attachments={booking.attachments} />
