@@ -1,5 +1,6 @@
 import { InvoiceStatus, type Currency, type PaymentMethod } from '@prisma/client';
 import { prisma, type Db } from '@/lib/prisma';
+import { inTransaction } from '@/lib/tx';
 import { add, isPositive, subtract, toDecimal, toStorage } from '@/lib/money';
 import { addDays, toDateOnly, today } from '@/lib/dates';
 import { nextInvoiceNumber } from './reference.service';
@@ -12,10 +13,6 @@ import { recalcBookingPaymentStatus, recalcInvoiceStatus } from './payment.servi
  * that also re-derives the affected roll-ups, so a booking's payment status and
  * an invoice's status can never disagree with the payments beneath them.
  */
-
-function isTransaction(db: Db): boolean {
-  return !('$transaction' in db);
-}
 
 export type InvoiceLineInput = {
   bookingId?: string | null;
@@ -105,7 +102,7 @@ export async function createInvoice(
     });
   };
 
-  return isTransaction(db) ? run(db) : prisma.$transaction((tx) => run(tx));
+  return inTransaction(db, run);
 }
 
 /** Mark an invoice as sent, which is what makes it eligible to go overdue. */
@@ -129,7 +126,7 @@ export async function sendInvoice(invoiceId: string, db: Db = prisma) {
     return recalcInvoiceStatus(tx, invoiceId);
   };
 
-  return isTransaction(db) ? run(db) : prisma.$transaction((tx) => run(tx));
+  return inTransaction(db, run);
 }
 
 export async function cancelInvoice(invoiceId: string, db: Db = prisma) {
@@ -225,7 +222,7 @@ export async function recordPayment(
     return payment;
   };
 
-  return isTransaction(db) ? run(db) : prisma.$transaction((tx) => run(tx));
+  return inTransaction(db, run);
 }
 
 /** Remove a payment recorded in error, re-deriving everything it touched. */
@@ -249,7 +246,7 @@ export async function voidPayment(paymentId: string, db: Db = prisma) {
     }
   };
 
-  return isTransaction(db) ? run(db) : prisma.$transaction((tx) => run(tx));
+  return inTransaction(db, run);
 }
 
 /**
@@ -297,7 +294,7 @@ export async function recordRefund(
     return refund;
   };
 
-  return isTransaction(db) ? run(db) : prisma.$transaction((tx) => run(tx));
+  return inTransaction(db, run);
 }
 
 /** Move a refund to processed or rejected, re-deriving the booking. */
@@ -318,7 +315,7 @@ export async function setRefundStatus(
     return refund;
   };
 
-  return isTransaction(db) ? run(db) : prisma.$transaction((tx) => run(tx));
+  return inTransaction(db, run);
 }
 
 /**

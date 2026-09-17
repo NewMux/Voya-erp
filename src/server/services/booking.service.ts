@@ -7,6 +7,7 @@ import {
   type Prisma,
 } from '@prisma/client';
 import { prisma, type Db } from '@/lib/prisma';
+import { inTransaction } from '@/lib/tx';
 import {
   add,
   convertToBase,
@@ -376,11 +377,7 @@ export async function createBooking(input: CreateBookingInput, db: Db = prisma) 
   };
 
   // Reuse the caller's transaction when there is one, so callers can compose.
-  return isTransaction(db) ? run(db) : prisma.$transaction((tx) => run(tx));
-}
-
-function isTransaction(db: Db): boolean {
-  return !('$transaction' in db);
+  return inTransaction(db, run);
 }
 
 /**
@@ -556,7 +553,7 @@ export async function updateBookingStatus(
     return updated;
   };
 
-  return isTransaction(db) ? run(db) : prisma.$transaction((tx) => run(tx));
+  return inTransaction(db, run);
 }
 
 /** Balance instalments falling due within `daysAhead`, for the reminder job. */
