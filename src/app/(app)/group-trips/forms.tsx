@@ -1,10 +1,11 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, type ReactNode } from 'react';
 import {
   createDepartureAction,
   createTripTemplate,
   joinWaitlistAction,
+  sendItineraryShareAction,
   updateDepartureCapacity,
   updateDepartureCost,
   updateDepartureStatus,
@@ -336,6 +337,40 @@ export function WaitlistEntryActions({
       <Button type="submit" name="status" value="CANCELLED" size="sm" variant="ghost">
         Remove
       </Button>
+    </form>
+  );
+}
+
+/**
+ * Queues the itinerary PDF link via WhatsApp — either the whole group
+ * (`customerId` omitted) or one traveler. Dispatch itself happens from
+ * /notifications, same as every other queued message.
+ */
+export function ItineraryShareButton({
+  departureId,
+  customerId,
+  size = 'md',
+  variant = 'secondary',
+  children,
+}: {
+  departureId: string;
+  customerId?: string;
+  size?: 'sm' | 'md';
+  variant?: 'secondary' | 'ghost';
+  children: ReactNode;
+}) {
+  const [state, action] = useActionState(sendItineraryShareAction, idleState);
+
+  return (
+    <form action={action} className="inline">
+      <input type="hidden" name="departureId" value={departureId} />
+      {customerId ? <input type="hidden" name="customerId" value={customerId} /> : null}
+      <SubmitButton size={size} variant={variant} pendingLabel="Queuing…">
+        {children}
+      </SubmitButton>
+      {state.message ? (
+        <span className="ml-2 text-xs text-slate-500">{state.message}</span>
+      ) : null}
     </form>
   );
 }

@@ -21,6 +21,7 @@ export const TEMPLATE_KEYS = {
   BALANCE_DUE_REMINDER: 'balance_due_reminder',
   MEMBERSHIP_RENEWAL_REMINDER: 'membership_renewal_reminder',
   GROUP_CAPACITY_ALERT: 'group_capacity_alert',
+  GROUP_ITINERARY_SHARE: 'group_itinerary_share',
 } as const;
 
 /**
@@ -262,6 +263,40 @@ export async function enqueueMembershipRenewalReminder(
       membershipNumber: membership.membershipNumber,
       tier: membership.tier,
       expiryDate: formatDate(membership.expiryDate),
+    },
+  });
+}
+
+/**
+ * Share the itinerary PDF with a traveler on a Group Adventure — staff
+ * initiated, not scheduled, so the dedupe key is scoped to today rather than
+ * a fixed occurrence: sending it again after an itinerary change is the
+ * point, not a bug to guard against, but one click should not double-queue.
+ */
+export async function enqueueItineraryShare(
+  db: Db,
+  input: { departureId: string; customerId: string; toPhone: string; customerName: string; itineraryUrl: string },
+) {
+  const departure = await db.groupDeparture.findUnique({
+    where: { id: input.departureId },
+    select: { name: true, departureDate: true },
+  });
+  if (!departure) return null;
+
+  return enqueue(db, {
+    event: NotificationEvent.GROUP_ITINERARY_SHARE,
+    templateKey: TEMPLATE_KEYS.GROUP_ITINERARY_SHARE,
+    dedupeKey: `group_itinerary_share:${input.departureId}:${input.customerId}:${new Date()
+      .toISOString()
+      .slice(0, 10)}`,
+    toPhone: input.toPhone,
+    customerId: input.customerId,
+    departureId: input.departureId,
+    variables: {
+      customerName: input.customerName,
+      tripName: departure.name,
+      departureDate: formatDate(departure.departureDate),
+      itineraryUrl: input.itineraryUrl,
     },
   });
 }

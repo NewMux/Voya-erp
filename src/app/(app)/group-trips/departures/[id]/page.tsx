@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Download } from 'lucide-react';
+import { Download, FileText } from 'lucide-react';
 import { canSeeFinancials, requireUser } from '@/server/guards';
 import { prisma } from '@/lib/prisma';
 import { departureRoster, departureWithCounts, waitlistInOrder } from '@/server/services/group.service';
@@ -20,7 +20,12 @@ import {
   Th,
 } from '@/components/ui';
 import { BookingStatusBadge, DepartureStatusBadge, humanise } from '@/components/status';
-import { DepartureControls, WaitlistEntryActions, WaitlistForm } from '../../forms';
+import {
+  DepartureControls,
+  ItineraryShareButton,
+  WaitlistEntryActions,
+  WaitlistForm,
+} from '../../forms';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,12 +68,24 @@ export default async function DeparturePage({ params }: { params: Promise<{ id: 
           <>
             <DepartureStatusBadge status={departure.status} />
             <a
+              href={`/api/group-trips/departures/${departure.id}/itinerary`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-voya-800 hover:bg-slate-50"
+            >
+              <FileText className="h-4 w-4" aria-hidden />
+              Print itinerary
+            </a>
+            <a
               href={`/group-trips/departures/${departure.id}/roster.csv`}
               className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-voya-800 hover:bg-slate-50"
             >
               <Download className="h-4 w-4" aria-hidden />
               Export roster
             </a>
+            <ItineraryShareButton departureId={departure.id} variant="secondary">
+              Message whole group
+            </ItineraryShareButton>
             <LinkButton href={`/bookings/new?departureId=${departure.id}`}>
               Book seats
             </LinkButton>
@@ -125,6 +142,7 @@ export default async function DeparturePage({ params }: { params: Promise<{ id: 
                     <Th className="text-right">Seats</Th>
                     <Th className="text-right">Single supp.</Th>
                     <Th>Status</Th>
+                    <Th />
                   </tr>
                 </thead>
                 <tbody>
@@ -150,6 +168,16 @@ export default async function DeparturePage({ params }: { params: Promise<{ id: 
                       <Td className="text-right tabular-nums">{row.singleSupplementSeats}</Td>
                       <Td>
                         <BookingStatusBadge status={row.booking.status} />
+                      </Td>
+                      <Td>
+                        <ItineraryShareButton
+                          departureId={departure.id}
+                          customerId={row.booking.customer.id}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          Message
+                        </ItineraryShareButton>
                       </Td>
                     </tr>
                   ))}

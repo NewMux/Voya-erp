@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { assertRole } from '@/server/guards';
@@ -16,7 +17,11 @@ import {
 } from '@/lib/validation';
 import { toStorage } from '@/lib/money';
 import { createDeparture, joinWaitlist } from '@/server/services/group.service';
-import { enqueueCapacityAlertIfNeeded } from '@/server/services/notification.service';
+import {
+  enqueueCapacityAlertIfNeeded,
+  enqueueItineraryShare,
+  whatsappNumberFor,
+} from '@/server/services/notification.service';
 import { parseForm, toActionState, type ActionState } from './types';
 
 const templateSchema = z.object({
@@ -307,6 +312,78 @@ export async function updateWaitlistEntry(
 
     revalidatePath(`/group-trips/departures/${entry.departureId}`);
     return { ok: true, message: 'Waitlist updated.' };
+  } catch (error) {
+    return toActionState(error);
+  }
+}
+
+const itineraryShareSchema = z.object({
+  departureId: requiredString('Departure'),
+  // Absent means "the whole group" — every customer with a live booking on
+  // this departure; present means just that one.
+  customerId: optionalString,
+});
+
+/**
+ * Queue the itinerary PDF link to WhatsApp — to one traveler, or the whole
+ * group at once. Goes through the same outbox as every other message, so
+ * staff dispatch it from /notifications exactly like a reminder (manual
+ * wa.me link, or the Cloud API if configured).
+ */
+export async function sendItineraryShareAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    await assertRole('ADMIN', 'ACCOUNTANT', 'STAFF');
+
+    const parsed = parseForm(itineraryShareSchema, formData);
+    if (!parsed.success) return parsed.state;
+
+    const host = (await headers()).get('host');
+    const protocol = host?.startsWith('localhost') ? 'http' : 'https';
+    const itineraryUrl = `${protocol}://${host}/api/group-trips/departures/${parsed.data.departureId}/itinerary`;
+
+    const recipients = parsed.data.customerId
+      ? await prisma.customer.findMany({
+          where: { id: parsed.data.customerId },
+          select: { id: true, fullName: true, phone: true, whatsappPhone: true },
+        })
+      : await prisma.customer.findMany({
+          where: {
+            bookings: {
+              some: {
+                groupDetail: { departureId: parsed.data.departureId },
+                status: { not: 'CANCELLED' },
+              },
+            },
+          },
+          select: { id: true, fullName: true, phone: true, whatsappPhone: true },
+        });
+
+    let queued = 0;
+    for (const recipient of recipients) {
+      const toPhone = whatsappNumberFor(recipient);
+      if (!toPhone) continue;
+
+      const result = await enqueueItineraryShare(prisma, {
+        departureId: parsed.data.departureId,
+        customerId: recipient.id,
+        toPhone,
+        customerName: recipient.fullName,
+        itineraryUrl,
+      });
+      if (result) queued += 1;
+    }
+
+    revalidatePath('/notifications');
+    return {
+      ok: true,
+      message:
+        queued > 0
+          ? `Queued ${queued} itinerary message${queued === 1 ? '' : 's'} — send from Notifications.`
+          : 'Nothing queued: no WhatsApp number on file, or already sent today.',
+    };
   } catch (error) {
     return toActionState(error);
   }

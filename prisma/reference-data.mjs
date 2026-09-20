@@ -93,6 +93,20 @@ export const NOTIFICATION_TEMPLATES = [
       'seatsRemaining',
     ],
   },
+  {
+    key: 'group_itinerary_share',
+    event: 'GROUP_ITINERARY_SHARE',
+    name: 'Group Adventure itinerary share',
+    bodyEn:
+      'Hello {{customerName}}, here is your itinerary for {{tripName}}, departing ' +
+      '{{departureDate}}. Download the full PDF here: {{itineraryUrl}}. See you on the trip!',
+    bodyAr:
+      'مرحباً {{customerName}}، هذه رحلتك التفصيلية لـ {{tripName}}، المغادرة بتاريخ ' +
+      '{{departureDate}}. حمّل الملف الكامل من هنا: {{itineraryUrl}}. نراكم في الرحلة!',
+    metaTemplateName: 'voya_itinerary_share',
+    metaLanguageCode: 'en',
+    variables: ['customerName', 'tripName', 'departureDate', 'itineraryUrl'],
+  },
 ];
 
 export const SETTINGS = {
