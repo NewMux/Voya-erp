@@ -35,6 +35,20 @@ export type SupplierOption = {
   defaultCurrency: string;
 };
 
+type PackageComponentRow = {
+  kind: 'FLIGHT' | 'HOTEL' | 'TRANSPORT' | 'ACTIVITY' | 'OTHER';
+  description: string;
+  costAmount: string;
+};
+
+const PACKAGE_COMPONENT_KINDS: PackageComponentRow['kind'][] = [
+  'FLIGHT',
+  'HOTEL',
+  'TRANSPORT',
+  'ACTIVITY',
+  'OTHER',
+];
+
 const BOOKING_TYPES = [
   { value: 'FLIGHT', label: 'Flight' },
   { value: 'HOTEL', label: 'Hotel' },
@@ -76,6 +90,7 @@ export function BookingForm({
   const [depositValue, setDepositValue] = useState('30');
   const [departureId, setDepartureId] = useState('');
   const [seats, setSeats] = useState('1');
+  const [packageComponents, setPackageComponents] = useState<PackageComponentRow[]>([]);
 
   const selectedDeparture = departures.find((d) => d.id === departureId) ?? null;
 
@@ -92,7 +107,9 @@ export function BookingForm({
       type === 'GROUP_ADVENTURE' && selectedDeparture
         ? (Number.parseFloat(selectedDeparture.costPerSeat) || 0) *
           (Number.parseInt(seats, 10) || 0)
-        : (Number.parseFloat(costAmount) || 0) * (Number.parseFloat(rate) || 0);
+        : type === 'PACKAGE'
+          ? packageComponents.reduce((sum, c) => sum + (Number.parseFloat(c.costAmount) || 0), 0)
+          : (Number.parseFloat(costAmount) || 0) * (Number.parseFloat(rate) || 0);
 
     const depositRaw =
       depositType === 'NONE'
@@ -121,6 +138,7 @@ export function BookingForm({
     type,
     selectedDeparture,
     seats,
+    packageComponents,
   ]);
 
   const seatsRemaining = selectedDeparture
@@ -135,6 +153,11 @@ export function BookingForm({
 
       <input type="hidden" name="type" value={type} />
       <input type="hidden" name="customerId" value={customer?.id ?? ''} />
+      <input
+        type="hidden"
+        name="packageComponentsJson"
+        value={type === 'PACKAGE' ? JSON.stringify(packageComponents) : '[]'}
+      />
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
@@ -220,6 +243,9 @@ export function BookingForm({
             seatsRemaining={seatsRemaining}
             overCapacity={overCapacity}
             onPriceFromDeparture={(price) => setSellingAmount(price)}
+            packageComponents={packageComponents}
+            setPackageComponents={setPackageComponents}
+            canSeeCost={canSeeCost}
           />
 
           <Card title="Notes">
@@ -232,20 +258,22 @@ export function BookingForm({
         <div className="space-y-6">
           <Card title="Pricing">
             <div className="space-y-4">
-              {type === 'GROUP_ADVENTURE' ? (
+              {type === 'GROUP_ADVENTURE' || type === 'PACKAGE' ? (
                 <>
-                  {/* Cost is set once per trip on the departure itself, not
-                      entered per booking — see the Group Adventure page. */}
+                  {/* Cost is derived, not entered directly: from the
+                      departure for a Group Adventure, from the sum of the
+                      bundled components for a Package. */}
                   {canSeeCost ? (
-                    <Field label="Cost price" hint="Set on the departure, not here.">
+                    <Field
+                      label="Cost price"
+                      hint={
+                        type === 'GROUP_ADVENTURE'
+                          ? 'Set on the departure, not here.'
+                          : 'Sum of the package components below.'
+                      }
+                    >
                       <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                        {selectedDeparture
-                          ? money(
-                              (Number.parseFloat(selectedDeparture.costPerSeat) || 0) *
-                                (Number.parseInt(seats, 10) || 0),
-                            )
-                          : '0.000'}{' '}
-                        BHD
+                        {money(totals.costBase)} BHD
                       </p>
                     </Field>
                   ) : null}
@@ -433,6 +461,9 @@ function TypePanel({
   seatsRemaining,
   overCapacity,
   onPriceFromDeparture,
+  packageComponents,
+  setPackageComponents,
+  canSeeCost,
 }: {
   type: BookingType;
   errors: Record<string, string>;
@@ -445,6 +476,9 @@ function TypePanel({
   seatsRemaining: number | null;
   overCapacity: boolean;
   onPriceFromDeparture: (price: string) => void;
+  packageComponents: PackageComponentRow[];
+  setPackageComponents: (update: (rows: PackageComponentRow[]) => PackageComponentRow[]) => void;
+  canSeeCost: boolean;
 }) {
   switch (type) {
     case 'FLIGHT':
@@ -633,15 +667,103 @@ function TypePanel({
 
     case 'PACKAGE':
       return (
-        <Card
-          title="Package"
-          description="A package bundles flight, hotel, transport and activities under one price."
-        >
-          <p className="text-sm text-slate-600">
-            Enter the bundled selling price on the right. Individual components can be added to
-            the booking once it is created.
-          </p>
-        </Card>
+        <PackagePanel
+          components={packageComponents}
+          setComponents={setPackageComponents}
+          canSeeCost={canSeeCost}
+        />
       );
   }
+}
+
+/**
+ * A package bundles flight, hotel, transport and activities under one
+ * customer-facing price. Each component keeps its own internal cost so
+ * margin is still tracked, but the customer only ever sees the one selling
+ * price on the Pricing card.
+ */
+function PackagePanel({
+  components,
+  setComponents,
+  canSeeCost,
+}: {
+  components: PackageComponentRow[];
+  setComponents: (update: (rows: PackageComponentRow[]) => PackageComponentRow[]) => void;
+  canSeeCost: boolean;
+}) {
+  function addRow() {
+    setComponents((rows) => [...rows, { kind: 'FLIGHT', description: '', costAmount: '0' }]);
+  }
+  function removeRow(index: number) {
+    setComponents((rows) => rows.filter((_, i) => i !== index));
+  }
+  function updateRow(index: number, patch: Partial<PackageComponentRow>) {
+    setComponents((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  }
+
+  return (
+    <Card
+      title="Package components"
+      description="Flight, hotel, transport, activities — whatever this package bundles. The customer sees only the fixed selling price on the right."
+    >
+      {components.length === 0 ? (
+        <p className="text-sm text-slate-500">No components added yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {components.map((row, index) => (
+            <div
+              key={index}
+              className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 p-3 sm:grid-cols-[8rem_1fr_8rem_auto]"
+            >
+              <Select
+                value={row.kind}
+                onChange={(e) =>
+                  updateRow(index, { kind: e.target.value as PackageComponentRow['kind'] })
+                }
+                aria-label="Component type"
+              >
+                {PACKAGE_COMPONENT_KINDS.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {kind.charAt(0) + kind.slice(1).toLowerCase()}
+                  </option>
+                ))}
+              </Select>
+              <Input
+                value={row.description}
+                onChange={(e) => updateRow(index, { description: e.target.value })}
+                placeholder="BAH–DXB return, Emirates"
+                aria-label="Component description"
+              />
+              {canSeeCost ? (
+                <Input
+                  inputMode="decimal"
+                  value={row.costAmount}
+                  onChange={(e) => updateRow(index, { costAmount: e.target.value })}
+                  placeholder="Cost (BHD)"
+                  aria-label="Component cost"
+                />
+              ) : (
+                <div />
+              )}
+              <button
+                type="button"
+                onClick={() => removeRow(index)}
+                className="rounded-md border border-slate-300 px-2 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={addRow}
+        className="mt-3 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-sm text-voya-700 hover:bg-slate-50"
+      >
+        + Add component
+      </button>
+    </Card>
+  );
 }

@@ -82,7 +82,42 @@ const baseBookingSchema = z.object({
   departureId: optionalString,
   seats: count('Seats', 0).optional(),
   singleSupplementSeats: count('Single supplement seats', 0).optional(),
+
+  // Package — a JSON array built client-side, not flat fields, since the
+  // number of components is dynamic.
+  packageComponentsJson: optionalString,
 });
+
+const packageComponentSchema = z.object({
+  kind: z.enum(['FLIGHT', 'HOTEL', 'TRANSPORT', 'ACTIVITY', 'OTHER']),
+  description: requiredString('Component description'),
+  costAmount: money('Component cost'),
+});
+
+/** Parses and validates the Package components JSON blob from the form. */
+function parsePackageComponents(json: string | null | undefined) {
+  if (!json) return [];
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    throw new Error('Package components were not submitted correctly.');
+  }
+  if (!Array.isArray(raw)) return [];
+
+  // A row added and left blank (no description typed yet) is dropped rather
+  // than rejected — it is not a component yet, not an invalid one.
+  const filled = raw.filter(
+    (row) => typeof row === 'object' && row !== null && String((row as { description?: unknown }).description ?? '').trim().length > 0,
+  );
+  if (filled.length === 0) return [];
+
+  const result = z.array(packageComponentSchema).safeParse(filled);
+  if (!result.success) {
+    throw new Error('One of the package components is missing a description or a valid cost.');
+  }
+  return result.data;
+}
 
 /**
  * Per-type required fields.
@@ -230,6 +265,9 @@ export async function createBookingAction(
       ? await rateSheetInForce(prisma, data.supplierId, data.departureDate ?? new Date())
       : null;
 
+    const packageComponents =
+      data.type === 'PACKAGE' ? parsePackageComponents(data.packageComponentsJson) : undefined;
+
     const booking = await createBooking({
       customerId: data.customerId,
       type: data.type,
@@ -250,6 +288,7 @@ export async function createBookingAction(
       status: data.status as BookingStatus,
       notes: data.notes,
       createdById: user.id,
+      packageComponents,
       ...detailFor(data),
     });
 

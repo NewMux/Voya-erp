@@ -259,6 +259,20 @@ export async function createBooking(input: CreateBookingInput, db: Db = prisma) 
       fxRate = reserved.costFxRate;
     }
 
+    // A Package's cost is never entered directly either — it is the sum of
+    // its bundled components (each already tracked in its own currency),
+    // converted to BHD. The customer only ever sees the one selling price.
+    if (input.type === 'PACKAGE' && input.packageComponents?.length) {
+      const totalBase = input.packageComponents.reduce(
+        (sum, component) =>
+          add(sum, convertToBase(component.costAmount ?? 0, component.fxRate ?? 1)),
+        add(0),
+      );
+      costAmount = toStorage(totalBase);
+      costCurrency = 'BHD';
+      fxRate = 1;
+    }
+
     const financials = computeBookingFinancials({
       costAmount,
       costCurrency,
