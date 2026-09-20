@@ -97,6 +97,7 @@ const departureSchema = z.object({
   capacity: count('Capacity', 1),
   pricePerSeat: money('Price per seat'),
   singleSupplement: optionalMoney('Single supplement'),
+  costPerSeat: optionalMoney('Cost per seat'),
   tourLeaderName: optionalString,
   notes: optionalString,
 });
@@ -122,6 +123,7 @@ export async function createDepartureAction(
       capacity: parsed.data.capacity,
       pricePerSeat: toStorage(parsed.data.pricePerSeat),
       singleSupplement: toStorage(parsed.data.singleSupplement ?? 0),
+      costPerSeat: toStorage(parsed.data.costPerSeat ?? 0),
       tourLeaderName: parsed.data.tourLeaderName,
       notes: parsed.data.notes,
       status: 'OPEN',
@@ -214,6 +216,36 @@ export async function updateDepartureCapacity(
 
     revalidatePath(`/group-trips/departures/${parsed.data.departureId}`);
     return { ok: true, message: 'Capacity updated.' };
+  } catch (error) {
+    return toActionState(error);
+  }
+}
+
+const costSchema = z.object({
+  departureId: requiredString('Departure'),
+  costPerSeat: money('Cost per seat'),
+});
+
+/** Cost is set once per trip here — see PackageComponent/GroupAdventureDetail
+ * for why this no longer lives on the individual booking. Commercial data,
+ * so this action (and the field itself) is gated to ADMIN/ACCOUNTANT. */
+export async function updateDepartureCost(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    await assertRole('ADMIN', 'ACCOUNTANT');
+
+    const parsed = parseForm(costSchema, formData);
+    if (!parsed.success) return parsed.state;
+
+    await prisma.groupDeparture.update({
+      where: { id: parsed.data.departureId },
+      data: { costPerSeat: toStorage(parsed.data.costPerSeat) },
+    });
+
+    revalidatePath(`/group-trips/departures/${parsed.data.departureId}`);
+    return { ok: true, message: 'Cost per seat updated.' };
   } catch (error) {
     return toActionState(error);
   }

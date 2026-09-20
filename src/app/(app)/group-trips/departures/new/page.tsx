@@ -1,4 +1,4 @@
-import { requireUser } from '@/server/guards';
+import { canSeeFinancials, requireUser } from '@/server/guards';
 import { prisma } from '@/lib/prisma';
 import { PageHeader } from '@/components/ui';
 import { DepartureForm } from '../../forms';
@@ -11,7 +11,7 @@ export default async function NewDeparturePage({
 }: {
   searchParams: Promise<{ templateId?: string }>;
 }) {
-  const [, query] = await Promise.all([requireUser(), searchParams]);
+  const [user, query] = await Promise.all([requireUser(), searchParams]);
 
   const templates = await prisma.groupTripTemplate.findMany({
     where: { isActive: true },
@@ -25,7 +25,11 @@ export default async function NewDeparturePage({
         title="New departure"
         description="Seats, pricing and the capacity limit for one dated trip."
       />
-      <DepartureForm templates={templates} defaultTemplateId={query.templateId} />
+      <DepartureForm
+        templates={templates}
+        defaultTemplateId={query.templateId}
+        showCost={canSeeFinancials(user.role)}
+      />
     </>
   );
 }

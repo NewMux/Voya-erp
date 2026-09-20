@@ -6,6 +6,7 @@ import {
   createTripTemplate,
   joinWaitlistAction,
   updateDepartureCapacity,
+  updateDepartureCost,
   updateDepartureStatus,
   updateItineraryDay,
   updateWaitlistEntry,
@@ -94,9 +95,11 @@ export function ItineraryDayForm({
 export function DepartureForm({
   templates,
   defaultTemplateId,
+  showCost,
 }: {
   templates: Array<{ id: string; name: string; destination: string | null; durationDays: number }>;
   defaultTemplateId?: string;
+  showCost: boolean;
 }) {
   const [state, action] = useActionState(createDepartureAction, idleState);
   const errors = state.fieldErrors ?? {};
@@ -158,6 +161,16 @@ export function DepartureForm({
             <Input name="singleSupplement" inputMode="decimal" defaultValue="0" />
           </Field>
 
+          {showCost ? (
+            <Field
+              label="Cost per seat (BHD)"
+              hint="Set once for the whole trip — travellers booked onto it no longer enter their own cost price."
+              error={errors.costPerSeat}
+            >
+              <Input name="costPerSeat" inputMode="decimal" defaultValue="0" />
+            </Field>
+          ) : null}
+
           <Field label="Notes" error={errors.notes} className="sm:col-span-2">
             <Textarea name="notes" />
           </Field>
@@ -174,18 +187,23 @@ export function DepartureForm({
   );
 }
 
-/** Capacity and status controls on the departure page. */
+/** Capacity, cost and status controls on the departure page. */
 export function DepartureControls({
   departureId,
   capacity,
   status,
+  costPerSeat,
+  showCost,
 }: {
   departureId: string;
   capacity: number;
   status: string;
+  costPerSeat?: string;
+  showCost: boolean;
 }) {
   const [capacityState, capacityAction] = useActionState(updateDepartureCapacity, idleState);
   const [statusState, statusAction] = useActionState(updateDepartureStatus, idleState);
+  const [costState, costAction] = useActionState(updateDepartureCost, idleState);
 
   return (
     <Card title="Manage departure">
@@ -202,6 +220,25 @@ export function DepartureControls({
           </div>
         </Field>
       </form>
+
+      {showCost ? (
+        <form action={costAction} className="mb-4 border-t border-slate-100 pt-4">
+          <FormMessage state={costState} />
+          <input type="hidden" name="departureId" value={departureId} />
+
+          <Field
+            label="Cost per seat (BHD)"
+            hint="Applies to every booking on this trip going forward."
+          >
+            <div className="flex gap-2">
+              <Input name="costPerSeat" inputMode="decimal" defaultValue={costPerSeat ?? '0'} />
+              <SubmitButton size="sm" variant="secondary">
+                Update
+              </SubmitButton>
+            </div>
+          </Field>
+        </form>
+      ) : null}
 
       <form action={statusAction} className="border-t border-slate-100 pt-4">
         <FormMessage state={statusState} />

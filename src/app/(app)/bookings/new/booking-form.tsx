@@ -25,6 +25,7 @@ export type DepartureOption = {
   seatsBooked: number;
   pricePerSeat: string;
   singleSupplement: string;
+  costPerSeat: string;
 };
 
 export type SupplierOption = {
@@ -87,7 +88,11 @@ export function BookingForm({
     const rawDiscount = (selling * discountPercent) / 100;
     const discount = Math.min(rawDiscount, selling);
     const net = selling - discount;
-    const costBase = (Number.parseFloat(costAmount) || 0) * (Number.parseFloat(rate) || 0);
+    const costBase =
+      type === 'GROUP_ADVENTURE' && selectedDeparture
+        ? (Number.parseFloat(selectedDeparture.costPerSeat) || 0) *
+          (Number.parseInt(seats, 10) || 0)
+        : (Number.parseFloat(costAmount) || 0) * (Number.parseFloat(rate) || 0);
 
     const depositRaw =
       depositType === 'NONE'
@@ -106,7 +111,17 @@ export function BookingForm({
       deposit,
       balance: net - deposit,
     };
-  }, [sellingAmount, costAmount, rate, customer, depositType, depositValue]);
+  }, [
+    sellingAmount,
+    costAmount,
+    rate,
+    customer,
+    depositType,
+    depositValue,
+    type,
+    selectedDeparture,
+    seats,
+  ]);
 
   const seatsRemaining = selectedDeparture
     ? selectedDeparture.capacity - selectedDeparture.seatsBooked
@@ -217,7 +232,28 @@ export function BookingForm({
         <div className="space-y-6">
           <Card title="Pricing">
             <div className="space-y-4">
-              {canSeeCost ? (
+              {type === 'GROUP_ADVENTURE' ? (
+                <>
+                  {/* Cost is set once per trip on the departure itself, not
+                      entered per booking — see the Group Adventure page. */}
+                  {canSeeCost ? (
+                    <Field label="Cost price" hint="Set on the departure, not here.">
+                      <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                        {selectedDeparture
+                          ? money(
+                              (Number.parseFloat(selectedDeparture.costPerSeat) || 0) *
+                                (Number.parseInt(seats, 10) || 0),
+                            )
+                          : '0.000'}{' '}
+                        BHD
+                      </p>
+                    </Field>
+                  ) : null}
+                  <input type="hidden" name="costAmount" value="0" />
+                  <input type="hidden" name="costCurrency" value="BHD" />
+                  <input type="hidden" name="fxRate" value="1" />
+                </>
+              ) : canSeeCost ? (
                 <>
                   <Field label="Cost price" required error={errors.costAmount}>
                     <Input

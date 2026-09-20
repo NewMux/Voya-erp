@@ -34,6 +34,7 @@ export default async function NewBookingPage({
         seatsBooked: true,
         pricePerSeat: true,
         singleSupplement: true,
+        costPerSeat: true,
       },
     }),
   ]);
@@ -53,6 +54,7 @@ export default async function NewBookingPage({
     }
   }
 
+  const showCost = canSeeFinancials(user.role);
   const departureOptions: DepartureOption[] = departures.map((departure) => ({
     id: departure.id,
     name: departure.name,
@@ -61,6 +63,8 @@ export default async function NewBookingPage({
     seatsBooked: departure.seatsBooked,
     pricePerSeat: departure.pricePerSeat.toString(),
     singleSupplement: departure.singleSupplement.toString(),
+    // Never sent to a role that cannot see cost, not even hidden in props.
+    costPerSeat: showCost ? departure.costPerSeat.toString() : '0',
   }));
 
   const supplierOptions: SupplierOption[] = suppliers.map((supplier) => ({
@@ -80,7 +84,7 @@ export default async function NewBookingPage({
         suppliers={supplierOptions}
         departures={departureOptions}
         initialCustomer={initialCustomer}
-        canSeeCost={canSeeFinancials(user.role)}
+        canSeeCost={showCost}
       />
     </>
   );

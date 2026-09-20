@@ -27,6 +27,11 @@ export async function createDeparture(
     capacity: number;
     pricePerSeat: string;
     singleSupplement?: string;
+    // Set once per trip here — GROUP_ADVENTURE bookings derive their cost
+    // from this instead of staff entering it per traveller.
+    costPerSeat?: string;
+    costCurrency?: 'BHD' | 'USD' | 'EUR' | 'GBP' | 'SAR' | 'AED';
+    costFxRate?: string;
     tourLeaderName?: string | null;
     notes?: string | null;
     status?: 'DRAFT' | 'OPEN';
@@ -54,6 +59,9 @@ export async function createDeparture(
         capacity: input.capacity,
         pricePerSeat: input.pricePerSeat,
         singleSupplement: input.singleSupplement ?? '0',
+        costPerSeat: input.costPerSeat ?? '0',
+        costCurrency: input.costCurrency ?? 'BHD',
+        costFxRate: input.costFxRate ?? '1',
         tourLeaderName: input.tourLeaderName ?? null,
         notes: input.notes ?? null,
         status: input.status ?? 'OPEN',

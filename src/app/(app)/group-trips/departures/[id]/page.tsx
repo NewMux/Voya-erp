@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Download } from 'lucide-react';
-import { requireUser } from '@/server/guards';
+import { canSeeFinancials, requireUser } from '@/server/guards';
 import { prisma } from '@/lib/prisma';
 import { departureRoster, departureWithCounts, waitlistInOrder } from '@/server/services/group.service';
 import { formatDate } from '@/lib/dates';
@@ -34,7 +34,8 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function DeparturePage({ params }: { params: Promise<{ id: string }> }) {
-  await requireUser();
+  const user = await requireUser();
+  const showCost = canSeeFinancials(user.role);
   const { id } = await params;
 
   const departure = await departureWithCounts(id);
@@ -84,6 +85,9 @@ export default async function DeparturePage({ params }: { params: Promise<{ id: 
         />
         <Stat label="Seats remaining" value={String(departure.seatsRemaining)} />
         <Stat label="Price per seat" value={formatMoney(departure.pricePerSeat.toString())} />
+        {showCost ? (
+          <Stat label="Cost per seat" value={formatMoney(departure.costPerSeat.toString())} />
+        ) : null}
         <Stat
           label="Waitlist"
           value={String(waitlist.length)}
@@ -292,6 +296,8 @@ export default async function DeparturePage({ params }: { params: Promise<{ id: 
             departureId={departure.id}
             capacity={departure.capacity}
             status={departure.status}
+            costPerSeat={departure.costPerSeat.toString()}
+            showCost={showCost}
           />
 
           {departure.itineraryDays.length > 0 ? (

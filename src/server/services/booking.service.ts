@@ -228,19 +228,15 @@ export async function createBooking(input: CreateBookingInput, db: Db = prisma) 
     const benefit = await activeBenefitFor(tx, input.customerId, now);
     const discount = resolveMembershipDiscount(input.sellingAmount, benefit);
 
-    const financials = computeBookingFinancials({
-      costAmount: input.costAmount ?? 0,
-      costCurrency: input.costCurrency ?? 'BHD',
-      fxRate: input.fxRate ?? 1,
-      sellingAmount: input.sellingAmount,
-      membershipDiscountPercent: discount.percent,
-      membershipDiscountAmount: discount.amount,
-    });
-
     // 2. Reserve seats before anything else is written, so an oversold trip
-    //    fails fast and cheaply.
+    //    fails fast and cheaply. Cost for a Group Adventure booking is never
+    //    entered here — it is set once per trip on the departure and derived
+    //    below, seats × the trip's cost per seat.
     let groupDetail: { departureId: string; seats: number; singleSupplementSeats: number; pricePerSeat: string } | null =
       null;
+    let costAmount: string | number = input.costAmount ?? 0;
+    let costCurrency: Currency = input.costCurrency ?? 'BHD';
+    let fxRate: string | number = input.fxRate ?? 1;
 
     if (input.type === 'GROUP_ADVENTURE') {
       if (!input.groupAdventure) {
@@ -256,7 +252,21 @@ export async function createBooking(input: CreateBookingInput, db: Db = prisma) 
         singleSupplementSeats: input.groupAdventure.singleSupplementSeats ?? 0,
         pricePerSeat: reserved.pricePerSeat,
       };
+      costAmount = toStorage(
+        toDecimal(reserved.costPerSeat).times(input.groupAdventure.seats),
+      );
+      costCurrency = reserved.costCurrency;
+      fxRate = reserved.costFxRate;
     }
+
+    const financials = computeBookingFinancials({
+      costAmount,
+      costCurrency,
+      fxRate,
+      sellingAmount: input.sellingAmount,
+      membershipDiscountPercent: discount.percent,
+      membershipDiscountAmount: discount.amount,
+    });
 
     const reference = await nextBookingReference(tx, now);
 
@@ -390,15 +400,32 @@ export async function createBooking(input: CreateBookingInput, db: Db = prisma) 
 export async function reserveSeats(
   tx: Db,
   input: { departureId: string; seats: number },
-): Promise<{ pricePerSeat: string; seatsRemaining: number }> {
+): Promise<{
+  pricePerSeat: string;
+  costPerSeat: string;
+  costCurrency: Currency;
+  costFxRate: string;
+  seatsRemaining: number;
+}> {
   if (!Number.isInteger(input.seats) || input.seats < 1) {
     throw new Error('Seat count must be a positive whole number');
   }
 
   const locked = await tx.$queryRaw<
-    Array<{ id: string; capacity: number; seats_booked: number; price_per_seat: string; status: DepartureStatus }>
+    Array<{
+      id: string;
+      capacity: number;
+      seats_booked: number;
+      price_per_seat: string;
+      cost_per_seat: string;
+      cost_currency: Currency;
+      cost_fx_rate: string;
+      status: DepartureStatus;
+    }>
   >`
-    SELECT id, capacity, "seatsBooked" AS seats_booked, "pricePerSeat" AS price_per_seat, status
+    SELECT id, capacity, "seatsBooked" AS seats_booked, "pricePerSeat" AS price_per_seat,
+      "costPerSeat" AS cost_per_seat, "costCurrency" AS cost_currency, "costFxRate" AS cost_fx_rate,
+      status
     FROM group_departures
     WHERE id = ${input.departureId}
     FOR UPDATE
@@ -444,6 +471,9 @@ export async function reserveSeats(
 
   return {
     pricePerSeat: toStorage(departure.price_per_seat),
+    costPerSeat: toStorage(departure.cost_per_seat),
+    costCurrency: departure.cost_currency,
+    costFxRate: departure.cost_fx_rate,
     seatsRemaining: departure.capacity - seatsBooked,
   };
 }
