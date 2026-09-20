@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from 'react';
+import { cloneElement, isValidElement, type ComponentProps, type ReactElement, type ReactNode } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 
@@ -165,13 +165,27 @@ export function Field({
   children: ReactNode;
   className?: string;
 }) {
+  // Mark the actual control invalid (red border + aria-invalid), not just the
+  // text below it — a message alone is easy to miss when the field itself
+  // gives no visual sign anything is wrong.
+  const control =
+    error && isValidElement(children)
+      ? cloneElement(children as ReactElement<{ className?: string; 'aria-invalid'?: boolean }>, {
+          'aria-invalid': true,
+          className: cn(
+            (children.props as { className?: string }).className,
+            'border-red-400 focus:border-red-500',
+          ),
+        })
+      : children;
+
   return (
     <label className={cn('block', className)}>
       <span className="mb-1 block text-sm font-medium text-slate-700">
         {label}
         {required ? <span className="ml-0.5 text-red-600">*</span> : null}
       </span>
-      {children}
+      {control}
       {hint && !error ? <span className="mt-1 block text-xs text-slate-500">{hint}</span> : null}
       {error ? <span className="mt-1 block text-xs text-red-600">{error}</span> : null}
     </label>

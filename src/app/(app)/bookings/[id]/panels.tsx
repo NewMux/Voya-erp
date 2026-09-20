@@ -180,6 +180,7 @@ const ATTACHMENT_LABELS: Record<AttachmentKind, string> = {
   VOUCHER: 'Voucher',
   VISA_COPY: 'Visa copy',
   PASSPORT_COPY: 'Passport copy',
+  PHOTO: 'Photo',
   INVOICE: 'Invoice',
   OTHER: 'Other',
 };
