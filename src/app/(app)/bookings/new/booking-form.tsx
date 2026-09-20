@@ -2,7 +2,7 @@
 
 import { useActionState, useMemo, useState } from 'react';
 import { createBookingAction } from '@/server/actions/booking.actions';
-import { Alert, Badge, Card, Field, Input, LinkButton, Select, Textarea } from '@/components/ui';
+import { Alert, Badge, Card, CountryField, Field, Input, LinkButton, Select, Textarea } from '@/components/ui';
 import { FormActions, FormGrid, FormMessage, SubmitButton } from '@/components/form';
 import { idleState } from '@/server/actions/types';
 import { CURRENCY_VALUES } from '@/lib/validation';
@@ -476,7 +476,7 @@ function TypePanel({
         <Card title="Visa details">
           <FormGrid>
             <Field label="Destination country" required error={errors.destinationCountry}>
-              <Input name="destinationCountry" placeholder="Georgia" />
+              <CountryField name="destinationCountry" />
             </Field>
             <Field label="Visa type" required error={errors.visaType}>
               <Input name="visaType" placeholder="Tourist, single entry" />

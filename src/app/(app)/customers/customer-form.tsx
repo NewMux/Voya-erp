@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import type { Customer } from '@prisma/client';
-import { Card, Field, Input, LinkButton, Select, Textarea } from '@/components/ui';
+import { Card, CountryField, Field, Input, LinkButton, Select, Textarea } from '@/components/ui';
 import { FormActions, FormGrid, FormMessage, SubmitButton } from '@/components/form';
 import { idleState, type ActionState } from '@/server/actions/types';
 import { toInputDate } from '@/lib/dates';
@@ -58,18 +58,8 @@ export function CustomerForm({
               </Select>
             </Field>
 
-            <Field
-              label="Nationality"
-              hint="Two-letter country code, for visa lookups."
-              error={errors.nationality}
-            >
-              <Input
-                name="nationality"
-                defaultValue={customer?.nationality ?? ''}
-                maxLength={2}
-                placeholder="BH"
-                className="uppercase"
-              />
+            <Field label="Nationality" error={errors.nationality}>
+              <CountryField name="nationality" defaultValue={customer?.nationality ?? ''} />
             </Field>
           </FormGrid>
         </Card>

@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import type { Supplier } from '@prisma/client';
-import { Card, Field, Input, LinkButton, Select, Textarea } from '@/components/ui';
+import { Card, CountryField, Field, Input, LinkButton, Select, Textarea } from '@/components/ui';
 import { FormActions, FormGrid, FormMessage, SubmitButton } from '@/components/form';
 import { idleState, type ActionState } from '@/server/actions/types';
 import { CURRENCY_VALUES } from '@/lib/validation';
@@ -48,13 +48,7 @@ export function SupplierForm({
             </Field>
 
             <Field label="Country" error={errors.country}>
-              <Input
-                name="country"
-                defaultValue={supplier?.country ?? ''}
-                maxLength={2}
-                placeholder="BH"
-                className="uppercase"
-              />
+              <CountryField name="country" defaultValue={supplier?.country ?? ''} />
             </Field>
 
             <Field label="Contact email" error={errors.contactEmail}>

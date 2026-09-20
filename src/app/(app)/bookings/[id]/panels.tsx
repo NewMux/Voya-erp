@@ -10,7 +10,7 @@ import {
   updateBookingStatusAction,
   uploadAttachment,
 } from '@/server/actions/booking.actions';
-import { Button, Card, Field, Input, Select, Textarea } from '@/components/ui';
+import { Button, Card, CountryField, Field, Input, Select, Textarea } from '@/components/ui';
 import {
   recordRefundAction,
   setRefundStatusAction,
@@ -157,7 +157,7 @@ export function TravelersPanel({
           </Field>
 
           <Field label="Nationality">
-            <Input name="nationality" maxLength={2} className="uppercase" placeholder="BH" />
+            <CountryField name="nationality" />
           </Field>
 
           <Field label="Phone">

@@ -1,6 +1,7 @@
 import { cloneElement, isValidElement, type ComponentProps, type ReactElement, type ReactNode } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { COUNTRIES } from '@/lib/countries';
 
 /**
  * A small shared component kit.
@@ -148,6 +149,34 @@ export function Textarea({ className, ...props }: ComponentProps<'textarea'>) {
 
 export function Select({ className, ...props }: ComponentProps<'select'>) {
   return <select className={cn(fieldBase, 'pr-8', className)} {...props} />;
+}
+
+/**
+ * A type-ahead country picker — a native <input list> bound to a <datalist>,
+ * so there is no new dependency for something the browser already does.
+ * Every country field in the app stores the country's plain name (see
+ * src/lib/countries.ts), so this is a drop-in replacement for a free-text
+ * Input wherever a field asks for a country.
+ */
+export function CountryField({ name, className, ...props }: ComponentProps<'input'> & { name: string }) {
+  const listId = `country-list-${name}`;
+  return (
+    <>
+      <input
+        list={listId}
+        name={name}
+        autoComplete="off"
+        placeholder="Search country…"
+        className={cn(fieldBase, className)}
+        {...props}
+      />
+      <datalist id={listId}>
+        {COUNTRIES.map((country) => (
+          <option key={country} value={country} />
+        ))}
+      </datalist>
+    </>
+  );
 }
 
 export function Field({

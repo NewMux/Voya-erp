@@ -1,18 +1,52 @@
 import Link from 'next/link';
+import { Search } from 'lucide-react';
+import type { Prisma, SupplierType } from '@prisma/client';
 import { requireRole } from '@/server/guards';
 import { suppliersWithBalances } from '@/server/services/supplier.service';
 import { formatMoney } from '@/lib/money';
-import { Badge, Card, EmptyState, LinkButton, PageHeader, Table, Td, Th } from '@/components/ui';
+import {
+  Badge,
+  Card,
+  CountryField,
+  EmptyState,
+  Input,
+  LinkButton,
+  PageHeader,
+  Select,
+  Table,
+  Td,
+  Th,
+} from '@/components/ui';
 import { humanise } from '@/components/status';
 
 export const metadata = { title: 'Suppliers' };
 export const dynamic = 'force-dynamic';
 
-export default async function SuppliersPage() {
+const SUPPLIER_TYPES: SupplierType[] = ['AIRLINE', 'HOTEL', 'DMC', 'TRANSPORT', 'VISA_AGENT'];
+
+export default async function SuppliersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; type?: string; country?: string }>;
+}) {
   // Supplier terms and balances are commercial data; reservations staff see
   // supplier names on bookings but do not manage them here.
   await requireRole('ADMIN', 'ACCOUNTANT');
-  const suppliers = await suppliersWithBalances();
+  const query = await searchParams;
+
+  const where: Prisma.SupplierWhereInput = {};
+  if (query.q?.trim()) {
+    where.name = { contains: query.q.trim(), mode: 'insensitive' };
+  }
+  if (query.type && SUPPLIER_TYPES.includes(query.type as SupplierType)) {
+    where.type = query.type as SupplierType;
+  }
+  if (query.country?.trim()) {
+    where.country = { equals: query.country.trim(), mode: 'insensitive' };
+  }
+
+  const suppliers = await suppliersWithBalances(undefined, where);
+  const hasFilter = Boolean(query.q || query.type || query.country);
 
   return (
     <>
@@ -23,10 +57,55 @@ export default async function SuppliersPage() {
       />
 
       <Card>
+        <form method="get" className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-4">
+          <div className="relative sm:col-span-2">
+            <Search
+              className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400"
+              aria-hidden
+            />
+            <Input
+              name="q"
+              defaultValue={query.q ?? ''}
+              placeholder="Supplier name"
+              className="pl-9"
+              aria-label="Search suppliers"
+            />
+          </div>
+          <Select name="type" defaultValue={query.type ?? ''} aria-label="Filter by type">
+            <option value="">All types</option>
+            {SUPPLIER_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {humanise(type)}
+              </option>
+            ))}
+          </Select>
+          <CountryField
+            name="country"
+            defaultValue={query.country ?? ''}
+            placeholder="Any country"
+            aria-label="Filter by country"
+          />
+          <div className="flex gap-2 sm:col-span-4">
+            <button
+              type="submit"
+              className="rounded-md bg-voya-400 px-3.5 py-2 text-sm font-medium text-white hover:bg-voya-500"
+            >
+              Apply
+            </button>
+            <LinkButton href="/suppliers" variant="ghost">
+              Reset
+            </LinkButton>
+          </div>
+        </form>
+
         {suppliers.length === 0 ? (
           <EmptyState
-            title="No suppliers yet"
-            description="Add the airlines, hotels, DMCs and visa agents you book through."
+            title={hasFilter ? 'No suppliers match those filters' : 'No suppliers yet'}
+            description={
+              hasFilter
+                ? undefined
+                : 'Add the airlines, hotels, DMCs and visa agents you book through.'
+            }
             action={<LinkButton href="/suppliers/new">New supplier</LinkButton>}
           />
         ) : (

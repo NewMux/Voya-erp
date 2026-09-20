@@ -140,8 +140,12 @@ export function commissionFor(
 }
 
 /** Suppliers with their outstanding balance, for the list page. */
-export async function suppliersWithBalances(db: Db = prisma) {
+export async function suppliersWithBalances(
+  db: Db = prisma,
+  where: Prisma.SupplierWhereInput = {},
+) {
   const suppliers = await db.supplier.findMany({
+    where,
     orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     include: {
       _count: { select: { bookings: true, rateSheets: true } },

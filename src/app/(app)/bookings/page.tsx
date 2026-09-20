@@ -28,7 +28,13 @@ const TYPES = ['FLIGHT', 'HOTEL', 'PACKAGE', 'VISA', 'TRANSPORT', 'GROUP_ADVENTU
 export default async function BookingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; type?: string; payment?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    status?: string;
+    type?: string;
+    payment?: string;
+    supplier?: string;
+  }>;
 }) {
   const [user, query] = await Promise.all([requireUser(), searchParams]);
   const showMoney = canSeeFinancials(user.role);
@@ -53,6 +59,9 @@ export default async function BookingsPage({
   }
   if (query.payment && ['UNPAID', 'DEPOSIT_PAID', 'FULLY_PAID'].includes(query.payment)) {
     where.paymentStatus = query.payment as 'UNPAID' | 'DEPOSIT_PAID' | 'FULLY_PAID';
+  }
+  if (query.supplier?.trim()) {
+    where.supplier = { name: { contains: query.supplier.trim(), mode: 'insensitive' } };
   }
 
   const bookings = await prisma.booking.findMany({
@@ -118,6 +127,13 @@ export default async function BookingsPage({
             <option value="DEPOSIT_PAID">Deposit paid</option>
             <option value="FULLY_PAID">Fully paid</option>
           </Select>
+
+          <Input
+            name="supplier"
+            defaultValue={query.supplier ?? ''}
+            placeholder="Supplier name"
+            aria-label="Filter by supplier"
+          />
 
           <div className="flex gap-2 sm:col-span-3">
             <button

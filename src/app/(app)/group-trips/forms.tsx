@@ -10,7 +10,7 @@ import {
   updateItineraryDay,
   updateWaitlistEntry,
 } from '@/server/actions/group.actions';
-import { Button, Card, Field, Input, LinkButton, Select, Textarea } from '@/components/ui';
+import { Button, Card, CountryField, Field, Input, LinkButton, Select, Textarea } from '@/components/ui';
 import { FormActions, FormGrid, FormMessage, SubmitButton } from '@/components/form';
 import { idleState } from '@/server/actions/types';
 
@@ -30,7 +30,7 @@ export function TripTemplateForm() {
           </Field>
 
           <Field label="Destination" error={errors.destination}>
-            <Input name="destination" placeholder="Tbilisi, Georgia" />
+            <CountryField name="destination" placeholder="Tbilisi, Georgia" />
           </Field>
 
           <Field label="Duration (days)" required error={errors.durationDays}>
@@ -127,7 +127,7 @@ export function DepartureForm({
           </Field>
 
           <Field label="Destination" error={errors.destination}>
-            <Input name="destination" />
+            <CountryField name="destination" />
           </Field>
 
           <Field label="Tour leader" error={errors.tourLeaderName}>
