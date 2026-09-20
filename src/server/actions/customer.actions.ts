@@ -19,6 +19,7 @@ import { issueMembership, renewMembership } from '@/server/services/membership.s
 import { toDateOnly } from '@/lib/dates';
 import { toStorage } from '@/lib/money';
 import { storage } from '@/server/storage';
+import type { PickerCustomer } from '@/app/(app)/bookings/new/customer-picker';
 import { parseForm, toActionState, type ActionState } from './types';
 
 const customerSchema = z.object({
@@ -81,6 +82,49 @@ export async function createCustomer(
 
   revalidatePath('/customers');
   redirect(`/customers/${customerId}`);
+}
+
+const quickCreateSchema = z.object({
+  fullName: requiredString('Full name'),
+  phone,
+});
+
+/**
+ * Create a customer from the New Booking screen without leaving it — phone
+ * or membership number is searched first (see lookupCustomers); this is the
+ * fallback when nothing matches. Only name and phone are required here, same
+ * as the minimum the schema itself demands; everything else (passport,
+ * nationality, etc.) can be filled in later from the customer's own page.
+ */
+export async function quickCreateCustomer(input: {
+  fullName: string;
+  phone: string;
+}): Promise<{ customer: PickerCustomer } | { error: string }> {
+  await assertRole('ADMIN', 'ACCOUNTANT', 'STAFF');
+
+  const parsed = quickCreateSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid name or phone.' };
+  }
+
+  const customer = await prisma.customer.create({
+    data: { fullName: parsed.data.fullName, phone: parsed.data.phone },
+  });
+
+  return {
+    customer: {
+      id: customer.id,
+      fullName: customer.fullName,
+      phone: customer.phone,
+      email: customer.email,
+      nationality: customer.nationality,
+      passportNumber: customer.passportNumber,
+      passportExpiry: null,
+      customerType: customer.customerType,
+      companyName: customer.companyName,
+      membership: null,
+    },
+  };
 }
 
 export async function updateCustomer(

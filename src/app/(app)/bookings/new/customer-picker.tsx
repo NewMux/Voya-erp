@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Search, X } from 'lucide-react';
 import { Badge, Button, Input } from '@/components/ui';
 import { lookupCustomers } from '@/server/actions/lookup.actions';
+import { quickCreateCustomer } from '@/server/actions/customer.actions';
 
 /**
  * Customer picker for the booking screen.
@@ -48,6 +49,34 @@ export function CustomerPicker({
   const [isPending, startTransition] = useTransition();
   // Guards against an earlier, slower request overwriting a later one.
   const requestId = useRef(0);
+
+  const [quickCreating, setQuickCreating] = useState(false);
+  const [quickName, setQuickName] = useState('');
+  const [quickPhone, setQuickPhone] = useState('');
+  const [quickError, setQuickError] = useState<string | null>(null);
+  const [isCreating, startCreating] = useTransition();
+
+  function openQuickCreate() {
+    // The search query is usually the phone/membership number staff typed
+    // first — reuse it as the starting phone value rather than retyping.
+    setQuickPhone(/[a-z]/i.test(query) ? '' : query.trim());
+    setQuickName('');
+    setQuickError(null);
+    setQuickCreating(true);
+  }
+
+  function submitQuickCreate() {
+    setQuickError(null);
+    startCreating(async () => {
+      const result = await quickCreateCustomer({ fullName: quickName, phone: quickPhone });
+      if ('error' in result) {
+        setQuickError(result.error);
+        return;
+      }
+      onChange(result.customer);
+      setQuickCreating(false);
+    });
+  }
 
   // Debounced search. Bumping requestId first means an in-flight request for a
   // stale query is discarded when it returns, so a slow early response cannot
@@ -191,14 +220,57 @@ export function CustomerPicker({
         </ul>
       ) : null}
 
-      {showResults && searched && !isPending && visibleResults.length === 0 ? (
-        <p className="mt-2 text-sm text-slate-500">
+      {showResults && searched && !isPending && visibleResults.length === 0 && !quickCreating ? (
+        <div className="mt-2 text-sm text-slate-500">
           No customer matched.{' '}
+          <button
+            type="button"
+            onClick={openQuickCreate}
+            className="text-voya-700 underline"
+          >
+            Add them now
+          </button>{' '}
+          — the rest of their profile can be filled in later, or{' '}
           <Link href="/customers/new" className="text-voya-700 underline">
-            Create one
+            open the full form
           </Link>
           .
-        </p>
+        </div>
+      ) : null}
+
+      {quickCreating ? (
+        <div className="mt-3 rounded-md border border-slate-200 p-3">
+          <p className="mb-2 text-xs font-medium tracking-wide text-slate-500 uppercase">
+            New customer
+          </p>
+          {quickError ? <p className="mb-2 text-xs text-red-600">{quickError}</p> : null}
+          <div className="space-y-2">
+            <Input
+              value={quickName}
+              onChange={(e) => setQuickName(e.target.value)}
+              placeholder="Full name"
+              autoFocus
+            />
+            <Input
+              value={quickPhone}
+              onChange={(e) => setQuickPhone(e.target.value)}
+              placeholder="Phone, e.g. +973 3300 1122"
+            />
+          </div>
+          <div className="mt-3 flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={isCreating || !quickName.trim() || !quickPhone.trim()}
+              onClick={submitQuickCreate}
+            >
+              {isCreating ? 'Creating…' : 'Create & continue'}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setQuickCreating(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
       ) : null}
     </div>
   );
