@@ -202,6 +202,7 @@ export type CreateBookingInput = {
     fullName: string;
     type?: 'ADULT' | 'CHILD' | 'INFANT';
     customerId?: string | null;
+    companionId?: string | null;
     passportNumber?: string | null;
     passportExpiry?: Date | null;
     nationality?: string | null;
@@ -342,6 +343,7 @@ export async function createBooking(input: CreateBookingInput, db: Db = prisma) 
                 fullName: traveler.fullName,
                 type: traveler.type ?? 'ADULT',
                 customerId: traveler.customerId ?? null,
+                companionId: traveler.companionId ?? null,
                 passportNumber: traveler.passportNumber ?? null,
                 passportExpiry: traveler.passportExpiry
                   ? toDateOnly(traveler.passportExpiry)

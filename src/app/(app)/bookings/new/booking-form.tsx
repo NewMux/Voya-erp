@@ -1,9 +1,21 @@
 'use client';
 
-import { useActionState, useMemo, useState } from 'react';
+import { useActionState, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { Companion } from '@prisma/client';
 import { createBookingAction } from '@/server/actions/booking.actions';
-import { Alert, Badge, Card, Field, Input, LinkButton, Select, Textarea } from '@/components/ui';
+import { lookupCompanions } from '@/server/actions/companion.actions';
+import {
+  Alert,
+  Badge,
+  Card,
+  CountryField,
+  Field,
+  Input,
+  LinkButton,
+  Select,
+  Textarea,
+} from '@/components/ui';
 import { FormActions, FormGrid, FormMessage, SubmitButton } from '@/components/form';
 import { idleState } from '@/server/actions/types';
 import { CURRENCY_VALUES } from '@/lib/validation';
@@ -35,6 +47,32 @@ export type SupplierOption = {
   type: string;
   defaultCurrency: string;
 };
+
+type TravelerRow = {
+  fullName: string;
+  type: 'ADULT' | 'CHILD' | 'INFANT';
+  dateOfBirth: string;
+  passportNumber: string;
+  passportExpiry: string;
+  nationality: string;
+  phone: string;
+  singleSupplement: boolean;
+  companionId: string;
+};
+
+function blankTravelerRow(type: TravelerRow['type'] = 'ADULT'): TravelerRow {
+  return {
+    fullName: '',
+    type,
+    dateOfBirth: '',
+    passportNumber: '',
+    passportExpiry: '',
+    nationality: '',
+    phone: '',
+    singleSupplement: false,
+    companionId: '',
+  };
+}
 
 type PackageComponentRow = {
   kind: 'FLIGHT' | 'HOTEL' | 'TRANSPORT' | 'ACTIVITY' | 'OTHER';
@@ -93,6 +131,51 @@ export function BookingForm({
   const [departureId, setDepartureId] = useState('');
   const [seats, setSeats] = useState('1');
   const [packageComponents, setPackageComponents] = useState<PackageComponentRow[]>([]);
+  const [adults, setAdults] = useState('1');
+  const [children, setChildren] = useState('0');
+  const [infants, setInfants] = useState('0');
+  const [travelerRows, setTravelerRows] = useState<TravelerRow[]>([]);
+  const [companions, setCompanions] = useState<Companion[]>([]);
+
+  const totalPax =
+    type === 'GROUP_ADVENTURE'
+      ? Number.parseInt(seats, 10) || 0
+      : (Number.parseInt(adults, 10) || 0) +
+        (Number.parseInt(children, 10) || 0) +
+        (Number.parseInt(infants, 10) || 0);
+
+  // Individual fields per traveler once there is more than one — a plain
+  // headcount is no longer enough (change request #11). Adjusted during
+  // render (React's documented pattern for resetting state when a computed
+  // value changes) rather than in an effect, since resizing the row array is
+  // itself a state update, not a side effect on an external system.
+  const [syncedPax, setSyncedPax] = useState(totalPax);
+  if (totalPax !== syncedPax) {
+    setSyncedPax(totalPax);
+    setTravelerRows((rows) => {
+      if (totalPax <= 1) return [];
+      if (rows.length === totalPax) return rows;
+      if (rows.length < totalPax) {
+        return [...rows, ...Array.from({ length: totalPax - rows.length }, () => blankTravelerRow())];
+      }
+      return rows.slice(0, totalPax);
+    });
+  }
+
+  // Companions on file for the chosen customer, offered on each traveler row
+  // so a dependent's details are picked, not retyped. The empty-customer
+  // case still resolves through the same promise chain so the only setState
+  // call is inside the .then() callback, not the effect body itself.
+  useEffect(() => {
+    let cancelled = false;
+    const id = customer?.id;
+    (id ? lookupCompanions(id) : Promise.resolve<Companion[]>([])).then((found) => {
+      if (!cancelled) setCompanions(found);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [customer?.id]);
 
   const selectedDeparture = departures.find((d) => d.id === departureId) ?? null;
 
@@ -160,6 +243,7 @@ export function BookingForm({
         name="packageComponentsJson"
         value={type === 'PACKAGE' ? JSON.stringify(packageComponents) : '[]'}
       />
+      <input type="hidden" name="travelersJson" value={JSON.stringify(travelerRows)} />
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
@@ -229,15 +313,30 @@ export function BookingForm({
               </Field>
 
               <Field label="Adults" required error={errors.adults}>
-                <Input name="adults" inputMode="numeric" defaultValue="1" />
+                <Input
+                  name="adults"
+                  inputMode="numeric"
+                  value={adults}
+                  onChange={(e) => setAdults(e.target.value)}
+                />
               </Field>
 
               <Field label="Children" error={errors.children}>
-                <Input name="children" inputMode="numeric" defaultValue="0" />
+                <Input
+                  name="children"
+                  inputMode="numeric"
+                  value={children}
+                  onChange={(e) => setChildren(e.target.value)}
+                />
               </Field>
 
               <Field label="Infants" error={errors.infants}>
-                <Input name="infants" inputMode="numeric" defaultValue="0" />
+                <Input
+                  name="infants"
+                  inputMode="numeric"
+                  value={infants}
+                  onChange={(e) => setInfants(e.target.value)}
+                />
               </Field>
 
               <Field label="Status" error={errors.status}>
@@ -249,6 +348,16 @@ export function BookingForm({
               </Field>
             </FormGrid>
           </Card>
+
+          {travelerRows.length > 0 ? (
+            <TravelersFields
+              rows={travelerRows}
+              setRows={setTravelerRows}
+              companions={companions}
+              showSingleSupplement={type === 'GROUP_ADVENTURE'}
+              errors={errors}
+            />
+          ) : null}
 
           <TypePanel
             type={type}
@@ -265,6 +374,7 @@ export function BookingForm({
             packageComponents={packageComponents}
             setPackageComponents={setPackageComponents}
             canSeeCost={canSeeCost}
+            travelerRows={travelerRows}
           />
 
           <Card title="Notes">
@@ -483,6 +593,7 @@ function TypePanel({
   packageComponents,
   setPackageComponents,
   canSeeCost,
+  travelerRows,
 }: {
   type: BookingType;
   errors: Record<string, string>;
@@ -498,6 +609,7 @@ function TypePanel({
   packageComponents: PackageComponentRow[];
   setPackageComponents: (update: (rows: PackageComponentRow[]) => PackageComponentRow[]) => void;
   canSeeCost: boolean;
+  travelerRows: TravelerRow[];
 }) {
   switch (type) {
     case 'FLIGHT':
@@ -636,13 +748,29 @@ function TypePanel({
               />
             </Field>
 
-            <Field
-              label="Single supplement seats"
-              hint="How many of those seats are in a single room."
-              error={errors.singleSupplementSeats}
-            >
-              <Input name="singleSupplementSeats" inputMode="numeric" defaultValue="0" />
-            </Field>
+            {travelerRows.length > 0 ? (
+              <Field
+                label="Single supplement seats"
+                hint="Set per traveler below — the count updates automatically."
+              >
+                <input
+                  type="hidden"
+                  name="singleSupplementSeats"
+                  value={travelerRows.filter((r) => r.singleSupplement).length}
+                />
+                <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                  {travelerRows.filter((r) => r.singleSupplement).length}
+                </p>
+              </Field>
+            ) : (
+              <Field
+                label="Single supplement seats"
+                hint="How many of those seats are in a single room."
+                error={errors.singleSupplementSeats}
+              >
+                <Input name="singleSupplementSeats" inputMode="numeric" defaultValue="0" />
+              </Field>
+            )}
           </FormGrid>
 
           {selectedDeparture ? (
@@ -675,6 +803,143 @@ function TypePanel({
         />
       );
   }
+}
+
+/**
+ * One row per traveler, shown once there is more than one — a bare headcount
+ * is no longer enough (change request #11). "Link companion" auto-fills a
+ * row from a dependent already on file for the chosen customer (#10)
+ * instead of retyping their passport and date of birth every trip.
+ */
+function TravelersFields({
+  rows,
+  setRows,
+  companions,
+  showSingleSupplement,
+  errors,
+}: {
+  rows: TravelerRow[];
+  setRows: (update: (rows: TravelerRow[]) => TravelerRow[]) => void;
+  companions: Companion[];
+  showSingleSupplement: boolean;
+  errors: Record<string, string>;
+}) {
+  function updateRow(index: number, patch: Partial<TravelerRow>) {
+    setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  }
+
+  function applyCompanion(index: number, companionId: string) {
+    const companion = companions.find((c) => c.id === companionId);
+    if (!companion) {
+      updateRow(index, { companionId: '' });
+      return;
+    }
+    updateRow(index, {
+      companionId,
+      fullName: companion.fullName,
+      dateOfBirth: companion.dateOfBirth ? companion.dateOfBirth.toString().slice(0, 10) : '',
+      passportNumber: companion.passportNumber ?? '',
+      passportExpiry: companion.passportExpiry ? companion.passportExpiry.toString().slice(0, 10) : '',
+      nationality: companion.nationality ?? '',
+    });
+  }
+
+  return (
+    <Card
+      title={`Travelers (${rows.length})`}
+      description="One row per person — required whenever more than one is travelling."
+    >
+      <div className="space-y-4">
+        {rows.map((row, index) => (
+          <div key={index} className="rounded-md border border-slate-200 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
+                Traveler {index + 1}
+              </p>
+              {companions.length > 0 ? (
+                <select
+                  value={row.companionId}
+                  onChange={(e) => applyCompanion(index, e.target.value)}
+                  className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                >
+                  <option value="">Link companion…</option>
+                  {companions.map((companion) => (
+                    <option key={companion.id} value={companion.id}>
+                      {companion.fullName}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
+
+            <FormGrid>
+              <Field label="Full name" required error={errors[`travelers.${index}.fullName`]}>
+                <Input
+                  value={row.fullName}
+                  onChange={(e) => updateRow(index, { fullName: e.target.value })}
+                />
+              </Field>
+              <Field label="Type">
+                <Select
+                  value={row.type}
+                  onChange={(e) => updateRow(index, { type: e.target.value as TravelerRow['type'] })}
+                >
+                  <option value="ADULT">Adult</option>
+                  <option value="CHILD">Child</option>
+                  <option value="INFANT">Infant</option>
+                </Select>
+              </Field>
+              <Field label="Date of birth">
+                <Input
+                  type="date"
+                  value={row.dateOfBirth}
+                  onChange={(e) => updateRow(index, { dateOfBirth: e.target.value })}
+                />
+              </Field>
+              <Field label="Nationality">
+                <CountryField
+                  name={`travelerNationality-${index}`}
+                  value={row.nationality}
+                  onChange={(e) => updateRow(index, { nationality: e.target.value })}
+                />
+              </Field>
+              <Field label="Passport number">
+                <Input
+                  value={row.passportNumber}
+                  onChange={(e) => updateRow(index, { passportNumber: e.target.value })}
+                />
+              </Field>
+              <Field label="Passport expiry">
+                <Input
+                  type="date"
+                  value={row.passportExpiry}
+                  onChange={(e) => updateRow(index, { passportExpiry: e.target.value })}
+                />
+              </Field>
+              <Field label="Phone" hint="Optional, if different from the lead traveler.">
+                <Input
+                  value={row.phone}
+                  onChange={(e) => updateRow(index, { phone: e.target.value })}
+                />
+              </Field>
+            </FormGrid>
+
+            {showSingleSupplement ? (
+              <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={row.singleSupplement}
+                  onChange={(e) => updateRow(index, { singleSupplement: e.target.checked })}
+                  className="h-4 w-4 rounded border-slate-300 text-voya-500"
+                />
+                Single room (single supplement applies)
+              </label>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
 }
 
 /**

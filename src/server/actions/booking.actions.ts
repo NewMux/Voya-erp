@@ -86,6 +86,10 @@ const baseBookingSchema = z.object({
   // Package — a JSON array built client-side, not flat fields, since the
   // number of components is dynamic.
   packageComponentsJson: optionalString,
+
+  // Individual traveler rows, same reasoning — a JSON array rather than
+  // flat fields, since the row count depends on the headcount.
+  travelersJson: optionalString,
 });
 
 const packageComponentSchema = z.object({
@@ -115,6 +119,43 @@ function parsePackageComponents(json: string | null | undefined) {
   const result = z.array(packageComponentSchema).safeParse(filled);
   if (!result.success) {
     throw new Error('One of the package components is missing a description or a valid cost.');
+  }
+  return result.data;
+}
+
+const travelerRowSchema = z.object({
+  fullName: requiredString('Traveler name'),
+  type: z.enum(['ADULT', 'CHILD', 'INFANT']),
+  dateOfBirth: optionalDateOnly,
+  passportNumber: optionalString,
+  passportExpiry: optionalDateOnly,
+  nationality: optionalString,
+  phone: optionalString,
+  singleSupplement: z.boolean(),
+  companionId: optionalString,
+});
+
+/** Parses and validates the individual-traveler-rows JSON blob from the form. */
+function parseTravelerRows(json: string | null | undefined) {
+  if (!json) return [];
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    throw new Error('Traveler details were not submitted correctly.');
+  }
+  if (!Array.isArray(raw)) return [];
+
+  // A row whose name was never filled in is dropped, not rejected — the
+  // headcount fields already cover the case of nobody named yet.
+  const filled = raw.filter(
+    (row) => typeof row === 'object' && row !== null && String((row as { fullName?: unknown }).fullName ?? '').trim().length > 0,
+  );
+  if (filled.length === 0) return [];
+
+  const result = z.array(travelerRowSchema).safeParse(filled);
+  if (!result.success) {
+    throw new Error('One of the traveler rows is missing a required detail.');
   }
   return result.data;
 }
@@ -267,6 +308,7 @@ export async function createBookingAction(
 
     const packageComponents =
       data.type === 'PACKAGE' ? parsePackageComponents(data.packageComponentsJson) : undefined;
+    const travelers = parseTravelerRows(data.travelersJson);
 
     const booking = await createBooking({
       customerId: data.customerId,
@@ -289,6 +331,7 @@ export async function createBookingAction(
       notes: data.notes,
       createdById: user.id,
       packageComponents,
+      travelers: travelers.length > 0 ? travelers : undefined,
       ...detailFor(data),
     });
 

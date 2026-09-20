@@ -23,6 +23,7 @@ import {
 import { BookingStatusBadge, humanise, PaymentStatusBadge } from '@/components/status';
 import { MembershipPanel } from './membership-panel';
 import { DocumentsPanel } from './documents-panel';
+import { CompanionsPanel } from './companions-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,12 +49,13 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
   });
   if (!customer) notFound();
 
-  const [bookings, lifetime, discountSetting] = await Promise.all([
+  const [bookings, lifetime, discountSetting, companions] = await Promise.all([
     customerBookingHistory(customer.id),
     // Lifetime value is admin/accounting only, per the PRD — don't even query
     // it for reservations staff.
     showMoney ? customerLifetimeValue(customer.id) : Promise.resolve(null),
     prisma.appSetting.findUnique({ where: { key: 'membership.defaultDiscountPercent' } }),
+    prisma.companion.findMany({ where: { primaryCustomerId: id }, orderBy: { fullName: 'asc' } }),
   ]);
 
   const whatsapp = normalisePhone(customer.whatsappPhone ?? customer.phone);
@@ -244,6 +246,8 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
           )}
 
           <DocumentsPanel customerId={customer.id} attachments={customer.attachments} />
+
+          <CompanionsPanel customerId={customer.id} companions={companions} />
         </div>
       </div>
     </>
