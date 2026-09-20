@@ -18,6 +18,7 @@ import {
 import { issueMembership, renewMembership } from '@/server/services/membership.service';
 import { toDateOnly } from '@/lib/dates';
 import { toStorage } from '@/lib/money';
+import { storage } from '@/server/storage';
 import { parseForm, toActionState, type ActionState } from './types';
 
 const customerSchema = z.object({
@@ -266,6 +267,68 @@ export async function cancelMembershipAction(
     revalidatePath(`/customers/${membership.customerId}`);
     revalidatePath('/customers');
     return { ok: true, message: 'Membership cancelled.' };
+  } catch (error) {
+    return toActionState(error);
+  }
+}
+
+const CUSTOMER_ATTACHMENT_KINDS = [
+  'PASSPORT_COPY',
+  'VISA_COPY',
+  'PHOTO',
+  'OTHER',
+] as const;
+
+/** Multi-file document upload on the customer profile — passport, visa, photo. */
+export async function uploadCustomerAttachment(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const user = await assertRole('ADMIN', 'ACCOUNTANT', 'STAFF');
+
+    const customerId = String(formData.get('customerId') ?? '');
+    const kindRaw = String(formData.get('kind') ?? 'OTHER');
+    const file = formData.get('file');
+
+    if (!customerId) return { ok: false, error: 'Missing customer.' };
+    if (!(file instanceof File) || file.size === 0) {
+      return { ok: false, error: 'Choose a file to upload.' };
+    }
+
+    const kind = CUSTOMER_ATTACHMENT_KINDS.includes(kindRaw as never)
+      ? (kindRaw as (typeof CUSTOMER_ATTACHMENT_KINDS)[number])
+      : 'OTHER';
+
+    const stored = await storage().save(file, 'customers');
+
+    await prisma.customerAttachment.create({
+      data: { customerId, kind, ...stored, uploadedById: user.id },
+    });
+
+    revalidatePath(`/customers/${customerId}`);
+    return { ok: true, message: 'Document uploaded.' };
+  } catch (error) {
+    return toActionState(error);
+  }
+}
+
+export async function deleteCustomerAttachment(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    await assertRole('ADMIN', 'ACCOUNTANT', 'STAFF');
+
+    const id = String(formData.get('attachmentId') ?? '');
+    const attachment = await prisma.customerAttachment.delete({ where: { id } });
+
+    await storage()
+      .remove(attachment.fileKey)
+      .catch((error) => console.error('Failed to remove stored file:', error));
+
+    revalidatePath(`/customers/${attachment.customerId}`);
+    return { ok: true, message: 'Document removed.' };
   } catch (error) {
     return toActionState(error);
   }

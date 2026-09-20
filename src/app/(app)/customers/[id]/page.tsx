@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { canSeeFinancials, requireUser } from '@/server/guards';
 import { prisma } from '@/lib/prisma';
-import { customerBookingHistory } from '@/server/services/customer.service';
+import { bookingDestination, customerBookingHistory } from '@/server/services/customer.service';
 import { customerLifetimeValue } from '@/server/services/membership.service';
 import { bookingBalance } from '@/server/services/booking.service';
 import { formatDate } from '@/lib/dates';
@@ -22,6 +22,7 @@ import {
 } from '@/components/ui';
 import { BookingStatusBadge, humanise, PaymentStatusBadge } from '@/components/status';
 import { MembershipPanel } from './membership-panel';
+import { DocumentsPanel } from './documents-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +41,10 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
 
   const customer = await prisma.customer.findUnique({
     where: { id },
-    include: { membership: { include: { renewals: { orderBy: { periodEnd: 'desc' } } } } },
+    include: {
+      membership: { include: { renewals: { orderBy: { periodEnd: 'desc' } } } },
+      attachments: { orderBy: { createdAt: 'desc' } },
+    },
   });
   if (!customer) notFound();
 
@@ -53,6 +57,15 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
   ]);
 
   const whatsapp = normalisePhone(customer.whatsappPhone ?? customer.phone);
+
+  const travelHistory = bookings
+    .filter((booking) => booking.status !== 'CANCELLED')
+    .map((booking) => ({
+      id: booking.id,
+      type: booking.type,
+      departureDate: booking.departureDate,
+      destination: bookingDestination(booking) ?? humanise(booking.type),
+    }));
 
   return (
     <>
@@ -177,6 +190,29 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
               </Table>
             )}
           </Card>
+
+          <Card
+            title="Travel history"
+            description="Destinations and services, auto-populated from bookings."
+          >
+            {travelHistory.length === 0 ? (
+              <p className="text-sm text-slate-500">No completed travel on file yet.</p>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {travelHistory.map((row) => (
+                  <li key={row.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <span className="font-medium text-slate-800">{row.destination}</span>
+                      <span className="ml-2 text-slate-500">{humanise(row.type)}</span>
+                    </div>
+                    <span className="whitespace-nowrap text-slate-500">
+                      {formatDate(row.departureDate)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
         </div>
 
         <div className="space-y-6">
@@ -206,6 +242,8 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
               <p className="text-sm text-slate-500">No membership on file.</p>
             </Card>
           )}
+
+          <DocumentsPanel customerId={customer.id} attachments={customer.attachments} />
         </div>
       </div>
     </>

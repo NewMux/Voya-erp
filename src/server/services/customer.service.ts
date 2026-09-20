@@ -106,6 +106,33 @@ export async function customerBookingHistory(customerId: string, db: Db = prisma
     include: {
       supplier: { select: { name: true } },
       scheduleItems: { select: { amountDue: true, paidAmount: true, status: true } },
+      // Destination-bearing detail, for the Travel history summary — which
+      // country/city/trip this booking actually went to, per type.
+      flightDetail: { select: { routeTo: true } },
+      hotelDetail: { select: { city: true, propertyName: true } },
+      visaDetail: { select: { destinationCountry: true } },
+      transportDetail: { select: { dropoffLocation: true, pickupLocation: true } },
+      groupDetail: { select: { departure: { select: { destination: true, name: true } } } },
     },
   });
+}
+
+/** A destination string for the Travel history summary, per booking type. */
+export function bookingDestination(
+  booking: Awaited<ReturnType<typeof customerBookingHistory>>[number],
+): string | null {
+  switch (booking.type) {
+    case 'FLIGHT':
+      return booking.flightDetail?.routeTo ?? null;
+    case 'HOTEL':
+      return booking.hotelDetail?.city ?? booking.hotelDetail?.propertyName ?? null;
+    case 'VISA':
+      return booking.visaDetail?.destinationCountry ?? null;
+    case 'TRANSPORT':
+      return booking.transportDetail?.dropoffLocation ?? booking.transportDetail?.pickupLocation ?? null;
+    case 'GROUP_ADVENTURE':
+      return booking.groupDetail?.departure.destination ?? booking.groupDetail?.departure.name ?? null;
+    case 'PACKAGE':
+      return null;
+  }
 }

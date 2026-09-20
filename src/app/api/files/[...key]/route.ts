@@ -26,8 +26,9 @@ export async function GET(
   const { key } = await params;
   const fileKey = key.join('/');
 
-  const [attachment, rateSheet] = await Promise.all([
+  const [attachment, customerAttachment, rateSheet] = await Promise.all([
     prisma.bookingAttachment.findUnique({ where: { fileKey } }),
+    prisma.customerAttachment.findUnique({ where: { fileKey } }),
     prisma.supplierRateSheet.findFirst({ where: { fileKey } }),
   ]);
 
@@ -37,13 +38,19 @@ export async function GET(
         mimeType: attachment.mimeType,
         sizeBytes: attachment.sizeBytes,
       }
-    : rateSheet?.fileName
+    : customerAttachment
       ? {
-          fileName: rateSheet.fileName,
-          mimeType: rateSheet.fileMimeType ?? 'application/octet-stream',
-          sizeBytes: 0,
+          fileName: customerAttachment.fileName,
+          mimeType: customerAttachment.mimeType,
+          sizeBytes: customerAttachment.sizeBytes,
         }
-      : null;
+      : rateSheet?.fileName
+        ? {
+            fileName: rateSheet.fileName,
+            mimeType: rateSheet.fileMimeType ?? 'application/octet-stream',
+            sizeBytes: 0,
+          }
+        : null;
 
   if (!record) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
