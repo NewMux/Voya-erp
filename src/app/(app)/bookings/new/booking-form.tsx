@@ -1,8 +1,9 @@
 'use client';
 
 import { useActionState, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { createBookingAction } from '@/server/actions/booking.actions';
-import { Alert, Badge, Card, CountryField, Field, Input, LinkButton, Select, Textarea } from '@/components/ui';
+import { Alert, Badge, Card, Field, Input, LinkButton, Select, Textarea } from '@/components/ui';
 import { FormActions, FormGrid, FormMessage, SubmitButton } from '@/components/form';
 import { idleState } from '@/server/actions/types';
 import { CURRENCY_VALUES } from '@/lib/validation';
@@ -77,6 +78,7 @@ export function BookingForm({
   initialCustomer: PickerCustomer | null;
   canSeeCost: boolean;
 }) {
+  const router = useRouter();
   const [state, formAction] = useActionState(createBookingAction, idleState);
   const errors = state.fieldErrors ?? {};
 
@@ -174,7 +176,24 @@ export function BookingForm({
           <Card title="Booking">
             <FormGrid>
               <Field label="Booking type" required>
-                <Select value={type} onChange={(e) => setType(e.target.value as BookingType)}>
+                <Select
+                  value={type}
+                  onChange={(e) => {
+                    const next = e.target.value as BookingType;
+                    if (next === 'VISA') {
+                      // Visa has its own dedicated screen — the country lookup
+                      // auto-fills embassy/fee/documents, which this generic
+                      // form has no room for.
+                      router.push(
+                        customer?.id
+                          ? `/bookings/new/visa?customerId=${customer.id}`
+                          : '/bookings/new/visa',
+                      );
+                      return;
+                    }
+                    setType(next);
+                  }}
+                >
                   {BOOKING_TYPES.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
@@ -542,28 +561,10 @@ function TypePanel({
       );
 
     case 'VISA':
-      return (
-        <Card title="Visa details">
-          <FormGrid>
-            <Field label="Destination country" required error={errors.destinationCountry}>
-              <CountryField name="destinationCountry" />
-            </Field>
-            <Field label="Visa type" required error={errors.visaType}>
-              <Input name="visaType" placeholder="Tourist, single entry" />
-            </Field>
-            <Field label="Processing status" error={errors.processingStatus}>
-              <Select name="processingStatus" defaultValue="NOT_STARTED">
-                <option value="NOT_STARTED">Not started</option>
-                <option value="DOCUMENTS_PENDING">Documents pending</option>
-                <option value="SUBMITTED">Submitted</option>
-                <option value="APPROVED">Approved</option>
-                <option value="ISSUED">Issued</option>
-                <option value="REJECTED">Rejected</option>
-              </Select>
-            </Field>
-          </FormGrid>
-        </Card>
-      );
+      // Unreachable — selecting Visa in the type dropdown navigates straight
+      // to the dedicated flow at /bookings/new/visa instead of setting this
+      // state. Kept only so the switch stays exhaustive over BookingType.
+      return null;
 
     case 'TRANSPORT':
       return (

@@ -1,6 +1,6 @@
 import { requireRole } from '@/server/guards';
 import { prisma } from '@/lib/prisma';
-import { PageHeader } from '@/components/ui';
+import { Card, LinkButton, PageHeader } from '@/components/ui';
 import { SettingsForm } from './settings-form';
 
 export const metadata = { title: 'Settings' };
@@ -22,6 +22,26 @@ export default async function SettingsPage() {
   return (
     <>
       <PageHeader title="Settings" description="Company details and defaults. Admin only." />
+
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Card
+          title="Visa countries"
+          description="Embassy, fee, documents, terms and processing time per destination."
+        >
+          <LinkButton href="/settings/visa-countries" variant="secondary" size="sm">
+            Manage visa countries
+          </LinkButton>
+        </Card>
+        <Card
+          title="Partner offers"
+          description="External partners offering discounts and benefits to Voya members."
+        >
+          <LinkButton href="/settings/partner-offers" variant="secondary" size="sm">
+            Manage partner offers
+          </LinkButton>
+        </Card>
+      </div>
+
       <SettingsForm settings={settings} />
     </>
   );
