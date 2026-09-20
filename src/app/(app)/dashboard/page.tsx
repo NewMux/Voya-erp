@@ -7,6 +7,8 @@ import { addDays, formatDate, today } from '@/lib/dates';
 import { add, formatMoney, subtract, toStorage } from '@/lib/money';
 import { Alert, Badge, Card, EmptyState, PageHeader, Stat, Table, Td, Th } from '@/components/ui';
 import { BookingStatusBadge, PaymentStatusBadge } from '@/components/status';
+import { WorldMap, type WorldMapPoint } from '@/components/world-map';
+import { resolveDestination } from '@/lib/destinations';
 
 export const metadata = { title: 'Dashboard' };
 export const dynamic = 'force-dynamic';
@@ -36,6 +38,7 @@ export default async function DashboardPage({
     pendingNotifications,
     fillingTrips,
     recentBookings,
+    worldMapDepartures,
   ] = await Promise.all([
     prisma.booking.count({
       where: {
@@ -79,7 +82,38 @@ export default async function DashboardPage({
         customer: { select: { fullName: true } },
       },
     }),
+    prisma.groupDeparture.findMany({
+      where: { status: { in: ['OPEN', 'FULL'] }, departureDate: { gte: from } },
+      orderBy: { departureDate: 'asc' },
+      take: 30,
+      select: {
+        id: true,
+        name: true,
+        destination: true,
+        capacity: true,
+        seatsBooked: true,
+      },
+    }),
   ]);
+
+  const worldMapPoints: WorldMapPoint[] = worldMapDepartures
+    .map((trip): WorldMapPoint | null => {
+      const point = resolveDestination(trip.destination) ?? resolveDestination(trip.name);
+      if (!point) return null;
+      const remaining = Math.max(0, trip.capacity - trip.seatsBooked);
+      return {
+        id: trip.id,
+        label: trip.name,
+        flag: point.flag,
+        lat: point.lat,
+        lng: point.lng,
+        href: `/group-trips/departures/${trip.id}`,
+        detail: `${trip.seatsBooked}/${trip.capacity} seats`,
+        tone: remaining === 0 ? 'warning' : 'success',
+        toneLabel: remaining === 0 ? 'Full' : `${remaining} left`,
+      };
+    })
+    .filter((point): point is WorldMapPoint => point !== null);
 
   const outstandingTotal = outstandingItems.reduce(
     (total, item) => add(total, subtract(item.amountDue, item.paidAmount)),
@@ -133,6 +167,15 @@ export default async function DashboardPage({
           value={String(pendingNotifications)}
           hint="Awaiting dispatch"
         />
+      </div>
+
+      <div className="mb-6">
+        <Card
+          title="Group Adventures around the world"
+          description="Open and filling departures over the next 30+ days."
+        >
+          <WorldMap points={worldMapPoints} />
+        </Card>
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
