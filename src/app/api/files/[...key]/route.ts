@@ -26,11 +26,26 @@ export async function GET(
   const { key } = await params;
   const fileKey = key.join('/');
 
-  const [attachment, customerAttachment, rateSheet] = await Promise.all([
+  const [attachment, customerAttachment, rateSheet, partnerOffer] = await Promise.all([
     prisma.bookingAttachment.findUnique({ where: { fileKey } }),
     prisma.customerAttachment.findUnique({ where: { fileKey } }),
     prisma.supplierRateSheet.findFirst({ where: { fileKey } }),
+    prisma.partnerOffer.findFirst({
+      where: { OR: [{ logoFileKey: fileKey }, { agreementDocumentFileKey: fileKey }] },
+    }),
   ]);
+
+  // PartnerOffer stores only the opaque key, not a filename/mime — the
+  // extension the storage layer already embeds in the key is enough to
+  // serve it correctly.
+  const mimeByExtension: Record<string, string> = {
+    pdf: 'application/pdf',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+  };
+  const extension = fileKey.split('.').pop()?.toLowerCase() ?? '';
 
   const record = attachment
     ? {
@@ -50,7 +65,13 @@ export async function GET(
             mimeType: rateSheet.fileMimeType ?? 'application/octet-stream',
             sizeBytes: 0,
           }
-        : null;
+        : partnerOffer
+          ? {
+              fileName: `${partnerOffer.name}-${fileKey === partnerOffer.logoFileKey ? 'logo' : 'agreement'}.${extension}`,
+              mimeType: mimeByExtension[extension] ?? 'application/octet-stream',
+              sizeBytes: 0,
+            }
+          : null;
 
   if (!record) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
