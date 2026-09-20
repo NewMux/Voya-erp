@@ -58,14 +58,20 @@ export async function enqueueDueNotifications(now: Date = new Date()) {
 
   let renewalRemindersQueued = 0;
   // Expiry is swept first, so a membership that lapsed today is not also
-  // chased for renewal in the same run.
-  const dueMemberships = await membershipsDueForRenewal(
-    prisma,
-    config.REMINDER_MEMBERSHIP_DAYS_BEFORE,
-    now,
-  );
-  for (const membership of dueMemberships) {
-    if (await enqueueMembershipRenewalReminder(prisma, membership.id)) {
+  // chased for renewal in the same run. Two independent stages — 1 month out
+  // and 1 week out — each with their own dedupe key, so both actually send
+  // rather than the second being silently absorbed by the first's row.
+  const [dueLong, dueShort] = await Promise.all([
+    membershipsDueForRenewal(prisma, config.REMINDER_MEMBERSHIP_DAYS_BEFORE, now),
+    membershipsDueForRenewal(prisma, config.REMINDER_MEMBERSHIP_DAYS_BEFORE_SHORT, now),
+  ]);
+  for (const membership of dueLong) {
+    if (await enqueueMembershipRenewalReminder(prisma, membership.id, 'LONG')) {
+      renewalRemindersQueued += 1;
+    }
+  }
+  for (const membership of dueShort) {
+    if (await enqueueMembershipRenewalReminder(prisma, membership.id, 'SHORT')) {
       renewalRemindersQueued += 1;
     }
   }

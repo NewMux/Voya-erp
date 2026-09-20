@@ -221,8 +221,20 @@ export async function enqueueBalanceReminder(db: Db, scheduleItemId: string) {
   });
 }
 
-/** Membership renewal reminder — sent ahead of annual expiry. */
-export async function enqueueMembershipRenewalReminder(db: Db, membershipId: string) {
+/**
+ * Membership renewal reminder — sent ahead of expiry.
+ *
+ * Two independent stages (1 month out, then 1 week out) rather than one:
+ * `stage` is folded into the dedupe key so the two do not collide — without
+ * it, both calls resolve to the same (event, entity, occurrence) row and the
+ * second stage would silently never send, since the first would already have
+ * claimed that key.
+ */
+export async function enqueueMembershipRenewalReminder(
+  db: Db,
+  membershipId: string,
+  stage: 'LONG' | 'SHORT' = 'LONG',
+) {
   const membership = await db.membership.findUnique({
     where: { id: membershipId },
     include: {
@@ -237,10 +249,11 @@ export async function enqueueMembershipRenewalReminder(db: Db, membershipId: str
   return enqueue(db, {
     event: NotificationEvent.MEMBERSHIP_RENEWAL_REMINDER,
     templateKey: TEMPLATE_KEYS.MEMBERSHIP_RENEWAL_REMINDER,
-    // Scoped to the expiry date, so next year's reminder is a distinct row.
+    // Scoped to the expiry date and stage, so next year's reminder is a
+    // distinct row and the two stages never collide with each other.
     dedupeKey: `membership_renewal:${membership.id}:${membership.expiryDate
       .toISOString()
-      .slice(0, 10)}`,
+      .slice(0, 10)}:${stage}`,
     toPhone,
     customerId: membership.customerId,
     membershipId: membership.id,

@@ -39,7 +39,7 @@ export function MembershipPanel({
     return (
       <Card
         title="Membership"
-        description="Issues the next sequential number and applies the discount at booking time."
+        description="Converts this regular customer into a member: issues the next sequential number and applies the discount at booking time."
       >
         <form action={issueAction}>
           <FormMessage state={issueState} />
@@ -66,7 +66,27 @@ export function MembershipPanel({
               <Input type="date" name="startDate" />
             </Field>
 
-            <Field label="Expiry date" hint="Defaults to one year from the start.">
+            <Field label="Renews every" hint="How long one subscription period lasts.">
+              <div className="flex gap-2">
+                <Input
+                  name="renewalValue"
+                  inputMode="numeric"
+                  defaultValue="1"
+                  className="w-16"
+                />
+                <Select name="renewalUnit" defaultValue="YEAR" className="flex-1">
+                  <option value="DAY">Day(s)</option>
+                  <option value="MONTH">Month(s)</option>
+                  <option value="YEAR">Year(s)</option>
+                </Select>
+              </div>
+            </Field>
+
+            <Field
+              label="Expiry date"
+              hint="Leave blank to use the renewal period above."
+              className="sm:col-span-2"
+            >
               <Input type="date" name="expiryDate" />
             </Field>
           </FormGrid>
@@ -82,7 +102,7 @@ export function MembershipPanel({
           </label>
 
           <div className="mt-4">
-            <SubmitButton>Issue membership</SubmitButton>
+            <SubmitButton>Convert to member</SubmitButton>
           </div>
         </form>
       </Card>
@@ -105,6 +125,10 @@ export function MembershipPanel({
           { label: 'Tier', value: membership.tier },
           { label: 'Started', value: formatDate(membership.startDate) },
           { label: 'Expires', value: formatDate(membership.expiryDate) },
+          {
+            label: 'Renews every',
+            value: `${membership.renewalValue} ${membership.renewalUnit.toLowerCase()}${membership.renewalValue === 1 ? '' : 's'}`,
+          },
           { label: 'Discount', value: `${membership.discountPercent.toString()}%` },
           {
             label: 'Group priority',
@@ -153,13 +177,29 @@ export function MembershipPanel({
                 </Select>
               </Field>
 
-              <Field label="Reference" className="sm:col-span-2">
+              <Field label="Reference">
                 <Input name="reference" placeholder="Receipt or transfer reference" />
+              </Field>
+
+              <Field label="Renews for">
+                <div className="flex gap-2">
+                  <Input
+                    name="renewalValue"
+                    inputMode="numeric"
+                    defaultValue={String(membership.renewalValue)}
+                    className="w-16"
+                  />
+                  <Select name="renewalUnit" defaultValue={membership.renewalUnit} className="flex-1">
+                    <option value="DAY">Day(s)</option>
+                    <option value="MONTH">Month(s)</option>
+                    <option value="YEAR">Year(s)</option>
+                  </Select>
+                </div>
               </Field>
             </FormGrid>
 
             <div className="mt-4">
-              <SubmitButton>Renew for another year</SubmitButton>
+              <SubmitButton>Renew membership</SubmitButton>
             </div>
           </form>
 

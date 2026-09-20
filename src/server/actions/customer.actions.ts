@@ -16,7 +16,7 @@ import {
   requiredString,
 } from '@/lib/validation';
 import { issueMembership, renewMembership } from '@/server/services/membership.service';
-import { annualExpiry, toDateOnly } from '@/lib/dates';
+import { toDateOnly } from '@/lib/dates';
 import { toStorage } from '@/lib/money';
 import { parseForm, toActionState, type ActionState } from './types';
 
@@ -118,6 +118,13 @@ const membershipSchema = z.object({
   tier: z.enum(['VOYAGEUR', 'GOLD', 'PLATINUM']),
   startDate: optionalDateOnly,
   expiryDate: optionalDateOnly,
+  renewalUnit: z.enum(['DAY', 'MONTH', 'YEAR']),
+  renewalValue: z
+    .string()
+    .trim()
+    .transform((v) => (v === '' ? '1' : v))
+    .refine((v) => /^\d+$/.test(v) && Number.parseInt(v, 10) >= 1, 'Must be a whole number of 1 or more')
+    .transform((v) => Number.parseInt(v, 10)),
   discountPercent: percent('Discount'),
   groupBookingPriority: checkbox,
 });
@@ -147,14 +154,17 @@ export async function issueMembershipAction(
         customerId,
         tier: rest.tier,
         startDate: start,
-        expiryDate: expiryDate ?? annualExpiry(start),
+        // Only overrides addPeriod's computed expiry when staff typed one in.
+        expiryDate: expiryDate ?? undefined,
+        renewalUnit: rest.renewalUnit,
+        renewalValue: rest.renewalValue,
         discountPercent: rest.discountPercent,
         groupBookingPriority: rest.groupBookingPriority,
       }),
     );
 
     revalidatePath(`/customers/${customerId}`);
-    revalidatePath('/memberships');
+    revalidatePath('/customers');
     return { ok: true, message: 'Membership issued.' };
   } catch (error) {
     return toActionState(error);
@@ -170,6 +180,13 @@ const renewalSchema = z.object({
     .refine((v) => /^\d+(\.\d{1,3})?$/.test(v), 'Amount must be a number'),
   method: z.enum(['CASH', 'CARD', 'BANK_TRANSFER', 'BENEFIT_PAY', 'OTHER']),
   reference: optionalString,
+  renewalUnit: z.enum(['DAY', 'MONTH', 'YEAR']),
+  renewalValue: z
+    .string()
+    .trim()
+    .transform((v) => (v === '' ? '1' : v))
+    .refine((v) => /^\d+$/.test(v) && Number.parseInt(v, 10) >= 1, 'Must be a whole number of 1 or more')
+    .transform((v) => Number.parseInt(v, 10)),
 });
 
 /**
@@ -216,11 +233,13 @@ export async function renewMembershipAction(
         membershipId: membership.id,
         amount: parsed.data.amount,
         paymentId: payment?.id ?? null,
+        renewalUnit: parsed.data.renewalUnit,
+        renewalValue: parsed.data.renewalValue,
       });
     });
 
     revalidatePath(`/customers/${membership.customerId}`);
-    revalidatePath('/memberships');
+    revalidatePath('/customers');
     return { ok: true, message: 'Membership renewed.' };
   } catch (error) {
     return toActionState(error);
@@ -245,7 +264,7 @@ export async function cancelMembershipAction(
     });
 
     revalidatePath(`/customers/${membership.customerId}`);
-    revalidatePath('/memberships');
+    revalidatePath('/customers');
     return { ok: true, message: 'Membership cancelled.' };
   } catch (error) {
     return toActionState(error);

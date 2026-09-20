@@ -47,7 +47,9 @@ const envSchema = z.object({
   WHATSAPP_STAFF_NUMBERS: z.string().optional(),
 
   REMINDER_BALANCE_DAYS_BEFORE: intWithDefault(7),
+  // Two membership-renewal reminder stages: one month out, then one week out.
   REMINDER_MEMBERSHIP_DAYS_BEFORE: intWithDefault(30),
+  REMINDER_MEMBERSHIP_DAYS_BEFORE_SHORT: intWithDefault(7),
   GROUP_CAPACITY_ALERT_THRESHOLD: intWithDefault(80),
 
   BASE_CURRENCY: z.enum(['BHD', 'USD', 'EUR', 'GBP', 'SAR', 'AED']).default('BHD'),

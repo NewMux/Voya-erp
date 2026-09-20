@@ -48,6 +48,24 @@ export function annualExpiry(start: Date): Date {
   return addDays(next, -1);
 }
 
+/**
+ * `value` of `unit`, minus a day, from `start` — the general form of
+ * `annualExpiry` (which is `addPeriod(start, 'YEAR', 1)`). Membership renewal
+ * is no longer fixed to a single annual cycle; staff pick the unit and value.
+ */
+export function addPeriod(start: Date, unit: 'DAY' | 'MONTH' | 'YEAR', value: number): Date {
+  const s = toDateOnly(start);
+  let next: Date;
+  if (unit === 'DAY') {
+    next = addDays(s, value);
+  } else if (unit === 'MONTH') {
+    next = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() + value, s.getUTCDate()));
+  } else {
+    next = new Date(Date.UTC(s.getUTCFullYear() + value, s.getUTCMonth(), s.getUTCDate()));
+  }
+  return addDays(toDateOnly(next), -1);
+}
+
 /** Display format, e.g. "17 Sep 2026". */
 export function formatDate(value: Date | string | null | undefined): string {
   if (!value) return '—';

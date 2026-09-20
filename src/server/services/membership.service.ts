@@ -1,7 +1,7 @@
-import { MembershipStatus, type Currency, type MembershipTier } from '@prisma/client';
+import { MembershipStatus, type Currency, type MembershipTier, type RenewalUnit } from '@prisma/client';
 import type { Db } from '@/lib/prisma';
 import { prisma } from '@/lib/prisma';
-import { annualExpiry, addDays, today, toDateOnly } from '@/lib/dates';
+import { addPeriod, addDays, today, toDateOnly } from '@/lib/dates';
 import { isPositive, percentOf, toDecimal, toStorage } from '@/lib/money';
 import { nextMembershipNumber } from './reference.service';
 
@@ -34,13 +34,19 @@ export async function issueMembership(
     tier?: MembershipTier;
     startDate?: Date;
     expiryDate?: Date;
+    renewalUnit?: RenewalUnit;
+    renewalValue?: number;
     discountPercent?: string | number;
     groupBookingPriority?: boolean;
     notes?: string | null;
   },
 ) {
   const start = toDateOnly(input.startDate ?? new Date());
-  const expiry = input.expiryDate ? toDateOnly(input.expiryDate) : annualExpiry(start);
+  const renewalUnit = input.renewalUnit ?? 'YEAR';
+  const renewalValue = input.renewalValue ?? 1;
+  const expiry = input.expiryDate
+    ? toDateOnly(input.expiryDate)
+    : addPeriod(start, renewalUnit, renewalValue);
 
   if (expiry.getTime() < start.getTime()) {
     throw new Error('Membership expiry date cannot be before its start date');
@@ -56,6 +62,8 @@ export async function issueMembership(
       status: MembershipStatus.ACTIVE,
       startDate: start,
       expiryDate: expiry,
+      renewalUnit,
+      renewalValue,
       discountPercent: toStorage(input.discountPercent ?? 0),
       groupBookingPriority: input.groupBookingPriority ?? true,
       notes: input.notes ?? null,
@@ -78,6 +86,8 @@ export async function renewMembership(
     paymentId?: string | null;
     periodStart?: Date;
     periodEnd?: Date;
+    renewalUnit?: RenewalUnit;
+    renewalValue?: number;
   },
 ) {
   const membership = await db.membership.findUnique({ where: { id: input.membershipId } });
@@ -90,7 +100,9 @@ export async function renewMembership(
     : currentExpiry.getTime() >= now.getTime()
       ? addDays(currentExpiry, 1)
       : now;
-  const end = input.periodEnd ? toDateOnly(input.periodEnd) : annualExpiry(start);
+  const renewalUnit = input.renewalUnit ?? membership.renewalUnit;
+  const renewalValue = input.renewalValue ?? membership.renewalValue;
+  const end = input.periodEnd ? toDateOnly(input.periodEnd) : addPeriod(start, renewalUnit, renewalValue);
 
   await db.membershipRenewal.create({
     data: {
@@ -108,6 +120,8 @@ export async function renewMembership(
     data: {
       expiryDate: end,
       status: MembershipStatus.ACTIVE,
+      renewalUnit,
+      renewalValue,
     },
   });
 }
