@@ -3,7 +3,7 @@ import { requireRole } from '@/server/guards';
 import { prisma } from '@/lib/prisma';
 import { outstandingScheduleItems } from '@/server/services/payment.service';
 import { daysBetween, formatDate, today } from '@/lib/dates';
-import { add, formatMoney, subtract, toStorage } from '@/lib/money';
+import { add, formatMoney, isPositive, subtract, toDecimal, toStorage } from '@/lib/money';
 import {
   Badge,
   Card,
@@ -16,18 +16,45 @@ import {
 } from '@/components/ui';
 import { humanise, ScheduleStatusBadge } from '@/components/status';
 
-export const metadata = { title: 'Payments' };
+function SectionHeading({ title, description }: { title: string; description?: string }) {
+  return (
+    <div className="mb-4">
+      <h2 className="text-lg font-semibold text-voya-900">{title}</h2>
+      {description ? <p className="mt-1 text-sm text-slate-500">{description}</p> : null}
+    </div>
+  );
+}
+
+export const metadata = { title: 'Finance' };
 export const dynamic = 'force-dynamic';
 
+const BOOKING_TYPE_LABEL: Record<string, string> = {
+  FLIGHT: 'Flight',
+  HOTEL: 'Hotel',
+  PACKAGE: 'Package',
+  VISA: 'Visa',
+  TRANSPORT: 'Transport',
+  GROUP_ADVENTURE: 'Group Adventure',
+};
+
+const MONTH_LABEL = new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric' });
+
 /**
- * Outstanding balances and recent receipts — PRD section 4.3.
+ * Finance — formerly "Payments" (change request #14). Restructured into a P&L
+ * overview (revenue, cost and margin from confirmed business) and the
+ * existing upcoming-payments tracking (outstanding balances, recent
+ * receipts, refunds), which is unchanged in substance.
  *
- * The outstanding list is sorted by due date, which is the order staff chase in.
+ * Cost and margin are real numbers here, unlike anywhere customer-facing —
+ * this page is ADMIN/ACCOUNTANT only, same gate as the old Payments page.
  */
-export default async function PaymentsPage() {
+export default async function FinancePage() {
   await requireRole('ADMIN', 'ACCOUNTANT');
 
-  const [items, payments, refunds] = await Promise.all([
+  const now = today();
+  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+
+  const [items, payments, refunds, typeTotals, recentBookings] = await Promise.all([
     outstandingScheduleItems(prisma),
     prisma.payment.findMany({
       orderBy: { paidAt: 'desc' },
@@ -49,9 +76,83 @@ export default async function PaymentsPage() {
         },
       },
     }),
+    prisma.booking.groupBy({
+      by: ['type'],
+      where: { status: { in: ['CONFIRMED', 'TICKETED', 'COMPLETED'] } },
+      _sum: { netSellingAmount: true, costAmountBase: true, marginAmount: true },
+      _count: true,
+    }),
+    prisma.booking.findMany({
+      where: {
+        status: { in: ['CONFIRMED', 'TICKETED', 'COMPLETED'] },
+        createdAt: { gte: sixMonthsAgo },
+      },
+      select: { createdAt: true, netSellingAmount: true, costAmountBase: true, marginAmount: true },
+    }),
   ]);
 
-  const now = today();
+  // --- P&L ---
+  const plTotal = typeTotals.reduce(
+    (acc, row) => ({
+      revenue: add(acc.revenue, row._sum.netSellingAmount ?? 0),
+      cost: add(acc.cost, row._sum.costAmountBase ?? 0),
+      margin: add(acc.margin, row._sum.marginAmount ?? 0),
+      count: acc.count + row._count,
+    }),
+    { revenue: add(0), cost: add(0), margin: add(0), count: 0 },
+  );
+  const marginPercent = isPositive(plTotal.revenue)
+    ? plTotal.margin.dividedBy(plTotal.revenue).times(100).toFixed(1)
+    : '0.0';
+
+  const typeRows = typeTotals
+    .map((row) => ({
+      type: row.type,
+      count: row._count,
+      revenue: toDecimal(row._sum.netSellingAmount ?? 0),
+      cost: toDecimal(row._sum.costAmountBase ?? 0),
+      margin: toDecimal(row._sum.marginAmount ?? 0),
+    }))
+    .sort((a, b) => b.revenue.comparedTo(a.revenue));
+
+  // Bucketed in JS rather than a raw SQL date_trunc — six months of bookings
+  // is a small enough set for an internal ERP, and this keeps the query
+  // portable.
+  const monthBuckets = new Map<
+    string,
+    {
+      date: Date;
+      revenue: ReturnType<typeof toDecimal>;
+      cost: ReturnType<typeof toDecimal>;
+      margin: ReturnType<typeof toDecimal>;
+      count: number;
+    }
+  >();
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+    monthBuckets.set(`${d.getFullYear()}-${d.getMonth()}`, {
+      date: d,
+      revenue: toDecimal(0),
+      cost: toDecimal(0),
+      margin: toDecimal(0),
+      count: 0,
+    });
+  }
+  for (const booking of recentBookings) {
+    const key = `${booking.createdAt.getFullYear()}-${booking.createdAt.getMonth()}`;
+    const bucket = monthBuckets.get(key);
+    if (!bucket) continue;
+    bucket.revenue = add(bucket.revenue, booking.netSellingAmount);
+    bucket.cost = add(bucket.cost, booking.costAmountBase);
+    bucket.margin = add(bucket.margin, booking.marginAmount);
+    bucket.count += 1;
+  }
+  const monthRows = [...monthBuckets.values()].map(({ date, ...bucket }) => ({
+    label: MONTH_LABEL.format(date),
+    ...bucket,
+  }));
+
+  // --- Upcoming payments (unchanged from the former Payments page) ---
   const outstandingTotal = items.reduce(
     (total, item) => add(total, subtract(item.amountDue, item.paidAmount)),
     add(0),
@@ -65,7 +166,84 @@ export default async function PaymentsPage() {
   return (
     <>
       <PageHeader
-        title="Payments"
+        title="Finance"
+        description="Profit & loss from confirmed business, plus everything unpaid, recent receipts and refunds."
+      />
+
+      <SectionHeading
+        title="Profit & loss"
+        description="Confirmed, ticketed and completed bookings — inquiries and cancellations excluded."
+      />
+
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-4">
+        <Stat label="Revenue" value={formatMoney(toStorage(plTotal.revenue))} hint={`${plTotal.count} bookings`} />
+        <Stat label="Cost" value={formatMoney(toStorage(plTotal.cost))} />
+        <Stat label="Margin" value={formatMoney(toStorage(plTotal.margin))} />
+        <Stat label="Margin %" value={`${marginPercent}%`} />
+      </div>
+
+      <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card title="By booking type">
+          {typeRows.length === 0 ? (
+            <EmptyState title="No confirmed business yet" />
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Type</Th>
+                  <Th className="text-right">Bookings</Th>
+                  <Th className="text-right">Revenue</Th>
+                  <Th className="text-right">Margin</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {typeRows.map((row) => (
+                  <tr key={row.type}>
+                    <Td>{BOOKING_TYPE_LABEL[row.type] ?? row.type}</Td>
+                    <Td className="text-right tabular-nums">{row.count}</Td>
+                    <Td className="text-right tabular-nums">
+                      {formatMoney(toStorage(row.revenue), 'BHD', { withCode: false })}
+                    </Td>
+                    <Td className="text-right tabular-nums">
+                      {formatMoney(toStorage(row.margin), 'BHD', { withCode: false })}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Card>
+
+        <Card title="Last 6 months">
+          <Table>
+            <thead>
+              <tr>
+                <Th>Month</Th>
+                <Th className="text-right">Bookings</Th>
+                <Th className="text-right">Revenue</Th>
+                <Th className="text-right">Margin</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {monthRows.map((row) => (
+                <tr key={row.label}>
+                  <Td>{row.label}</Td>
+                  <Td className="text-right tabular-nums">{row.count}</Td>
+                  <Td className="text-right tabular-nums">
+                    {formatMoney(toStorage(row.revenue), 'BHD', { withCode: false })}
+                  </Td>
+                  <Td className="text-right tabular-nums">
+                    {formatMoney(toStorage(row.margin), 'BHD', { withCode: false })}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Card>
+      </div>
+
+      <SectionHeading
+        title="Upcoming payments"
         description="Everything unpaid, sorted by due date, plus recent receipts and refunds."
       />
 

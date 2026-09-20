@@ -42,7 +42,7 @@ const NAV: NavItem[] = [
   { href: '/customers', label: 'Customers', icon: Users },
   { href: '/suppliers', label: 'Suppliers', icon: Building2 },
   { href: '/invoices', label: 'Invoices', icon: FileText },
-  { href: '/payments', label: 'Payments', icon: Wallet, roles: ['ADMIN', 'ACCOUNTANT'] },
+  { href: '/finance', label: 'Finance', icon: Wallet, roles: ['ADMIN', 'ACCOUNTANT'] },
   { href: '/notifications', label: 'Notifications', icon: Bell },
   { href: '/settings', label: 'Settings', icon: Settings, roles: ['ADMIN'] },
 ];

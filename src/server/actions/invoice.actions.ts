@@ -170,7 +170,7 @@ export async function recordPaymentAction(
         : [],
     });
 
-    revalidatePath('/payments');
+    revalidatePath('/finance');
     if (bookingId) revalidatePath(`/bookings/${bookingId}`);
     if (parsed.data.invoiceId) revalidatePath(`/invoices/${parsed.data.invoiceId}`);
     return { ok: true, message: 'Payment recorded.' };
@@ -192,7 +192,7 @@ export async function voidPaymentAction(
 
     await voidPayment(id);
 
-    revalidatePath('/payments');
+    revalidatePath('/finance');
     return { ok: true, message: 'Payment voided.' };
   } catch (error) {
     return toActionState(error);
@@ -221,7 +221,7 @@ export async function recordRefundAction(
     await recordRefund({ ...parsed.data, recordedById: user.id });
 
     revalidatePath(`/bookings/${parsed.data.bookingId}`);
-    revalidatePath('/payments');
+    revalidatePath('/finance');
     return { ok: true, message: 'Refund recorded.' };
   } catch (error) {
     return toActionState(error);
@@ -246,7 +246,7 @@ export async function setRefundStatusAction(
     const refund = await setRefundStatus(parsed.data);
 
     revalidatePath(`/bookings/${refund.bookingId}`);
-    revalidatePath('/payments');
+    revalidatePath('/finance');
     return { ok: true, message: 'Refund updated.' };
   } catch (error) {
     return toActionState(error);
