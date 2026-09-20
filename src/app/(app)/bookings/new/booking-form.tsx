@@ -110,11 +110,15 @@ export function BookingForm({
   departures,
   initialCustomer,
   canSeeCost,
+  familyDiscountEnabled,
+  familyDiscountPercent,
 }: {
   suppliers: SupplierOption[];
   departures: DepartureOption[];
   initialCustomer: PickerCustomer | null;
   canSeeCost: boolean;
+  familyDiscountEnabled: boolean;
+  familyDiscountPercent: string;
 }) {
   const router = useRouter();
   const [state, formAction] = useActionState(createBookingAction, idleState);
@@ -136,6 +140,8 @@ export function BookingForm({
   const [infants, setInfants] = useState('0');
   const [travelerRows, setTravelerRows] = useState<TravelerRow[]>([]);
   const [companions, setCompanions] = useState<Companion[]>([]);
+  // 'member' means no override — the server applies the member's own rate.
+  const [discountChoice, setDiscountChoice] = useState<'member' | 'family' | 'none'>('member');
 
   const totalPax =
     type === 'GROUP_ADVENTURE'
@@ -183,7 +189,11 @@ export function BookingForm({
   const totals = useMemo(() => {
     const selling = Number.parseFloat(sellingAmount) || 0;
     const discountPercent = customer?.membership?.active
-      ? Number.parseFloat(customer.membership.discountPercent)
+      ? discountChoice === 'family'
+        ? Number.parseFloat(familyDiscountPercent) || 0
+        : discountChoice === 'none'
+          ? 0
+          : Number.parseFloat(customer.membership.discountPercent)
       : 0;
     const rawDiscount = (selling * discountPercent) / 100;
     const discount = Math.min(rawDiscount, selling);
@@ -224,6 +234,8 @@ export function BookingForm({
     selectedDeparture,
     seats,
     packageComponents,
+    discountChoice,
+    familyDiscountPercent,
   ]);
 
   const seatsRemaining = selectedDeparture
@@ -461,6 +473,35 @@ export function BookingForm({
                 </>
               )}
 
+              <input
+                type="hidden"
+                name="discountOverridePercent"
+                value={
+                  discountChoice === 'family'
+                    ? familyDiscountPercent
+                    : discountChoice === 'none'
+                      ? '0'
+                      : ''
+                }
+              />
+              {customer?.membership?.active && familyDiscountEnabled ? (
+                <Field
+                  label="Discount"
+                  hint="Family rate is for a dependent travelling with the member — see Settings."
+                >
+                  <Select
+                    value={discountChoice}
+                    onChange={(e) => setDiscountChoice(e.target.value as typeof discountChoice)}
+                  >
+                    <option value="member">
+                      Member ({customer.membership.discountPercent}%)
+                    </option>
+                    <option value="family">Family ({familyDiscountPercent}%)</option>
+                    <option value="none">No discount</option>
+                  </Select>
+                </Field>
+              ) : null}
+
               <Field label="Selling price (BHD)" required error={errors.sellingAmount}>
                 <Input
                   name="sellingAmount"
@@ -474,7 +515,10 @@ export function BookingForm({
             <dl className="mt-4 space-y-1.5 border-t border-slate-100 pt-4 text-sm">
               {totals.discountPercent > 0 ? (
                 <div className="flex justify-between text-gold-700">
-                  <dt>Member discount ({totals.discountPercent}%)</dt>
+                  <dt>
+                    {discountChoice === 'family' ? 'Family' : 'Member'} discount (
+                    {totals.discountPercent}%)
+                  </dt>
                   <dd className="tabular-nums">−{money(totals.discount)}</dd>
                 </div>
               ) : null}

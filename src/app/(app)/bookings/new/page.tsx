@@ -16,7 +16,7 @@ export default async function NewBookingPage({
 }) {
   const [user, query] = await Promise.all([requireUser(), searchParams]);
 
-  const [suppliers, departures] = await Promise.all([
+  const [suppliers, departures, familySettings] = await Promise.all([
     prisma.supplier.findMany({
       where: { isActive: true },
       orderBy: { name: 'asc' },
@@ -37,7 +37,14 @@ export default async function NewBookingPage({
         costPerSeat: true,
       },
     }),
+    prisma.appSetting.findMany({
+      where: { key: { in: ['membership.familyDiscountEnabled', 'membership.familyDiscountPercent'] } },
+    }),
   ]);
+
+  const familySettingsMap = Object.fromEntries(familySettings.map((s) => [s.key, s.value]));
+  const familyDiscountEnabled = familySettingsMap['membership.familyDiscountEnabled'] === 'true';
+  const familyDiscountPercent = familySettingsMap['membership.familyDiscountPercent'] ?? '5';
 
   // Pre-select the customer when arriving from their page.
   let initialCustomer: PickerCustomer | null = null;
@@ -85,6 +92,8 @@ export default async function NewBookingPage({
         departures={departureOptions}
         initialCustomer={initialCustomer}
         canSeeCost={showCost}
+        familyDiscountEnabled={familyDiscountEnabled}
+        familyDiscountPercent={familyDiscountPercent}
       />
     </>
   );

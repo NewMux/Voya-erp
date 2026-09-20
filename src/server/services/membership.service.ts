@@ -192,15 +192,23 @@ export async function activeBenefitFor(
  * stores both: the percentage for the customer-facing explanation, the amount
  * so historical margin never shifts if the member's terms change later.
  */
+/**
+ * `overridePercent` is used for the family-member rate: a member still has
+ * to exist and be active (this is a member benefit, not a public discount),
+ * but the rate applied is the family percentage from Settings rather than
+ * the member's own, when staff mark the booking as being for a family
+ * member travelling with them (see Settings → Family Discount).
+ */
 export function resolveMembershipDiscount(
   sellingAmount: string | number,
   benefit: MembershipBenefit | null,
+  overridePercent?: string | number | null,
 ) {
   if (!benefit) {
     return { percent: '0.00', amount: toStorage(0) };
   }
 
-  const percent = toDecimal(benefit.discountPercent);
+  const percent = toDecimal(overridePercent ?? benefit.discountPercent);
   if (!isPositive(percent)) {
     return { percent: '0.00', amount: toStorage(0) };
   }

@@ -47,6 +47,9 @@ const baseBookingSchema = z.object({
 
   status: z.enum(['INQUIRY', 'CONFIRMED', 'TICKETED', 'COMPLETED', 'CANCELLED']),
   notes: optionalString,
+  // Empty means "use the member's own rate" (the default) — see Settings →
+  // Family discount.
+  discountOverridePercent: optionalString,
 
   // Flight
   airline: optionalString,
@@ -330,6 +333,7 @@ export async function createBookingAction(
       status: data.status as BookingStatus,
       notes: data.notes,
       createdById: user.id,
+      discountOverridePercent: data.discountOverridePercent || null,
       packageComponents,
       travelers: travelers.length > 0 ? travelers : undefined,
       ...detailFor(data),

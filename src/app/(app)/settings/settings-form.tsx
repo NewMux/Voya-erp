@@ -81,11 +81,37 @@ export function SettingsForm({ settings }: { settings: Record<string, string> })
           title="Membership"
           description="Pre-fills the discount field when issuing a new membership."
         >
-          <Field label="Default discount %" error={errors['membership.defaultDiscountPercent']}>
+          <Field label="Member's own discount %" error={errors['membership.defaultDiscountPercent']}>
             <Input
               name="membership.defaultDiscountPercent"
               inputMode="decimal"
               defaultValue={settings['membership.defaultDiscountPercent'] ?? '10'}
+            />
+          </Field>
+        </Card>
+
+        <Card
+          title="Family discount"
+          description="A separate rate for a member's family, on Voya's own bookings only — never on partner offers."
+        >
+          <label className="mb-4 flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              name="membership.familyDiscountEnabled"
+              defaultChecked={settings['membership.familyDiscountEnabled'] === 'true'}
+              className="h-4 w-4 rounded border-slate-300 text-voya-500"
+            />
+            Enable family discount on bookings
+          </label>
+          <Field
+            label="Family discount %"
+            hint="Staff choose this instead of the member's own rate on the booking screen."
+            error={errors['membership.familyDiscountPercent']}
+          >
+            <Input
+              name="membership.familyDiscountPercent"
+              inputMode="decimal"
+              defaultValue={settings['membership.familyDiscountPercent'] ?? '5'}
             />
           </Field>
         </Card>

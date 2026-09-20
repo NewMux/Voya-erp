@@ -168,6 +168,8 @@ export type CreateBookingInput = {
   costCurrency?: Currency;
   fxRate?: string | number;
   sellingAmount: string | number;
+  /** Family-member rate override — see resolveMembershipDiscount. */
+  discountOverridePercent?: string | number | null;
 
   depositType?: DepositType | null;
   depositValue?: string | number | null;
@@ -227,7 +229,11 @@ export async function createBooking(input: CreateBookingInput, db: Db = prisma) 
     // 1. Membership benefit, snapshotted so later tier changes never rewrite
     //    historical bookings.
     const benefit = await activeBenefitFor(tx, input.customerId, now);
-    const discount = resolveMembershipDiscount(input.sellingAmount, benefit);
+    const discount = resolveMembershipDiscount(
+      input.sellingAmount,
+      benefit,
+      input.discountOverridePercent,
+    );
 
     // 2. Reserve seats before anything else is written, so an oversold trip
     //    fails fast and cheaply. Cost for a Group Adventure booking is never

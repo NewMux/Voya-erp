@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { assertRole } from '@/server/guards';
-import { optionalString, percent, requiredString } from '@/lib/validation';
+import { checkbox, optionalString, percent, requiredString } from '@/lib/validation';
 import { parseForm, toActionState, type ActionState } from './types';
 
 /**
@@ -27,6 +27,8 @@ const settingsSchema = z.object({
   'invoice.terms': optionalString,
   'invoice.termsAr': optionalString,
   'membership.defaultDiscountPercent': percent('Default discount'),
+  'membership.familyDiscountEnabled': checkbox.transform((v) => (v ? 'true' : 'false')),
+  'membership.familyDiscountPercent': percent('Family discount'),
 });
 
 export async function updateSettings(
